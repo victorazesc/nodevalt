@@ -1,6 +1,8 @@
 import fs from "fs-extra";
+import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { initStore } from "../packages/core/src/config";
 import { openNodeValtDatabase } from "../packages/database/src/db";
@@ -12,6 +14,7 @@ import {
 import { restoreProjectNodeModules } from "../packages/materializer/src/restore-project";
 
 const tmpRoots: string[] = [];
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   await Promise.all(tmpRoots.map((tmpRoot) => fs.remove(tmpRoot)));
@@ -143,5 +146,36 @@ describe("materializeNpmProjectVirtual", () => {
     expect(result).toHaveLength(1);
     expect((await fs.lstat(binPath)).isSymbolicLink()).toBe(true);
     expect(await fs.readlink(binPath)).toBe("../tool/bin/tool.js");
+  });
+
+  it("runs npm dev and build scripts after materialization", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nodevalt-runtime-"));
+    tmpRoots.push(tmpRoot);
+
+    const projectPath = path.join(tmpRoot, "project");
+    await fs.copy(path.resolve("tests/fixtures/npm-basic"), projectPath);
+
+    const { storePath } = await initStore(path.join(tmpRoot, "store"));
+    const db = openNodeValtDatabase(storePath);
+
+    try {
+      await materializeNpmProject({
+        db,
+        storePath,
+        projectPath,
+      });
+
+      const dev = await execFileAsync("npm", ["run", "dev"], {
+        cwd: projectPath,
+      });
+      const build = await execFileAsync("npm", ["run", "build"], {
+        cwd: projectPath,
+      });
+
+      expect(dev.stdout).toContain("..dev");
+      expect(build.stdout).toContain("..build");
+    } finally {
+      db.close();
+    }
   });
 });

@@ -1,6 +1,10 @@
 {
   "name": "npm-basic",
   "version": "1.0.0",
+  "scripts": {
+    "dev": "node -e \"const leftPad = require('left-pad'); console.log(leftPad('dev', 5, '.'))\"",
+    "build": "node -e \"const leftPad = require('left-pad'); console.log(leftPad('build', 7, '.'))\""
+  },
   "dependencies": {
     "left-pad": "1.3.0"
   }
