@@ -20,5 +20,6 @@ npm run dev -- store populate ./app
 npm run dev -- materialize ./app
 npm run dev -- restore ./app
 npm run dev -- doctor ./app
+npm run dev -- gc
 npm run dev -- daemon start
 ```

@@ -7,6 +7,7 @@ import { getPackageCount } from "../../../packages/database/src/packages";
 import { getProjectStats, listProjects, upsertProject } from "../../../packages/database/src/projects";
 import { startDaemonWatcher } from "../../../packages/daemon/src/watcher";
 import { doctorNpmProject } from "../../../packages/doctor/src/doctor-project";
+import { collectGarbage } from "../../../packages/gc/src/garbage-collector";
 import {
   type ActivatedMaterializeProjectResult,
   type MaterializeProjectResult,
@@ -214,6 +215,25 @@ cli.command("doctor <project>", "Check a NodeValt npm project").action((project:
 
     if (!result.ok) {
       process.exitCode = 1;
+    }
+  }),
+);
+
+cli.command("gc", "Remove unreferenced packages from the global store").action(() =>
+  run(async () => {
+    const config = await loadOrCreateConfig();
+    const db = openNodeValtDatabase(config.storePath);
+
+    try {
+      const result = await collectGarbage({
+        db,
+        storePath: config.storePath,
+      });
+
+      console.log(`Unused packages removed: ${result.packagesRemoved}`);
+      console.log(`Disk freed: ${formatBytes(result.diskFreedBytes)}`);
+    } finally {
+      db.close();
     }
   }),
 );

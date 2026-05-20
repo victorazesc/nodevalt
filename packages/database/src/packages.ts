@@ -58,3 +58,11 @@ export function getPackageCount(db: Database.Database): number {
   const row = db.prepare("SELECT COUNT(*) AS count FROM packages").get() as { count: number };
   return row.count;
 }
+
+export function listPackages(db: Database.Database): PackageRow[] {
+  return db.prepare("SELECT * FROM packages ORDER BY name, version").all() as PackageRow[];
+}
+
+export function deletePackage(db: Database.Database, id: string): void {
+  db.prepare("DELETE FROM packages WHERE id = ?").run(id);
+}
