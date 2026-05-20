@@ -1,0 +1,34 @@
+{
+  "name": "nodevalt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "nodevalt": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsup apps/cli/src/index.ts --format esm --sourcemap --clean --out-dir dist/cli",
+    "dev": "tsx apps/cli/src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "cac": "^7.0.0",
+    "chokidar": "^5.0.0",
+    "fs-extra": "^11.3.5",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^25.9.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}
