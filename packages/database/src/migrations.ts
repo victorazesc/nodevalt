@@ -17,5 +17,16 @@ export function runMigrations(db: Database.Database): void {
       created_at TEXT,
       updated_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS packages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      integrity TEXT,
+      resolved TEXT,
+      store_path TEXT NOT NULL,
+      created_at TEXT,
+      updated_at TEXT
+    );
   `);
 }

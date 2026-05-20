@@ -8,6 +8,7 @@ MVP atual:
 - `nodevalt scan <path>`
 - `nodevalt status`
 - parser de `package-lock.json` v2/v3
+- store global para pacotes npm resolvidos no lockfile
 
 ```bash
 npm install
@@ -15,4 +16,5 @@ npm run build
 npm run dev -- init
 npm run dev -- scan ~/projects
 npm run dev -- status
+npm run dev -- store populate ./app
 ```

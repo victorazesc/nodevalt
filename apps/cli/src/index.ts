@@ -3,8 +3,10 @@ import { cac } from "cac";
 import { addWatchPath, initStore, loadOrCreateConfig } from "../../../packages/core/src/config";
 import { formatBytes, toDisplayPath } from "../../../packages/core/src/paths";
 import { openNodeValtDatabase } from "../../../packages/database/src/db";
+import { getPackageCount } from "../../../packages/database/src/packages";
 import { getProjectStats, listProjects, upsertProject } from "../../../packages/database/src/projects";
 import { scanProjects } from "../../../packages/scanner/src/scan";
+import { populateStoreFromNpmProject } from "../../../packages/store/src/populate-store";
 
 const cli = cac("nodevalt");
 
@@ -67,6 +69,7 @@ cli.command("status", "Show NodeValt status").action(() =>
     const config = await loadOrCreateConfig();
     const db = openNodeValtDatabase(config.storePath);
     const stats = getProjectStats(db);
+    const packageCount = getPackageCount(db);
     const projects = listProjects(db);
     db.close();
 
@@ -75,7 +78,7 @@ cli.command("status", "Show NodeValt status").action(() =>
     console.log(`Store path: ${toDisplayPath(config.storePath)}`);
     console.log(`Managed projects: ${stats.count}`);
     console.log(`Tracked node_modules: ${formatBytes(stats.totalNodeModulesSizeBytes)}`);
-    console.log("Packages in store: 0");
+    console.log(`Packages in store: ${packageCount}`);
     console.log("Package instances: 0");
     console.log("Estimated disk saved: 0 B");
     console.log("Daemon: not running");
@@ -89,6 +92,33 @@ cli.command("status", "Show NodeValt status").action(() =>
       if (projects.length > 10) {
         console.log(`- ... ${projects.length - 10} more`);
       }
+    }
+  }),
+);
+
+cli.command("store <action> <project>", "Manage the global package store").action((action: string, project: string) =>
+  run(async () => {
+    if (action !== "populate") {
+      throw new Error(`Unsupported store action: ${action}`);
+    }
+
+    const config = await loadOrCreateConfig();
+    const db = openNodeValtDatabase(config.storePath);
+
+    try {
+      const result = await populateStoreFromNpmProject({
+        db,
+        storePath: config.storePath,
+        projectPath: project,
+      });
+
+      console.log("Store populated");
+      console.log(`Packages resolved: ${result.resolved}`);
+      console.log(`Packages downloaded: ${result.downloaded}`);
+      console.log(`Packages reused: ${result.reused}`);
+      console.log(`Packages skipped: ${result.skipped}`);
+    } finally {
+      db.close();
     }
   }),
 );
