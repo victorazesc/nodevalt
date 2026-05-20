@@ -7,6 +7,7 @@ MVP atual:
 - `nodevalt init`
 - `nodevalt scan <path>`
 - `nodevalt status`
+- parser de `package-lock.json` v2/v3
 
 ```bash
 npm install
