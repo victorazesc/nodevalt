@@ -28,5 +28,15 @@ export function runMigrations(db: Database.Database): void {
       created_at TEXT,
       updated_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      type TEXT NOT NULL,
+      payload TEXT,
+      status TEXT,
+      created_at TEXT,
+      processed_at TEXT
+    );
   `);
 }

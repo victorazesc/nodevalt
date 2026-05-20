@@ -5,6 +5,7 @@ import { formatBytes, toDisplayPath } from "../../../packages/core/src/paths";
 import { openNodeValtDatabase } from "../../../packages/database/src/db";
 import { getPackageCount } from "../../../packages/database/src/packages";
 import { getProjectStats, listProjects, upsertProject } from "../../../packages/database/src/projects";
+import { startDaemonWatcher } from "../../../packages/daemon/src/watcher";
 import { doctorNpmProject } from "../../../packages/doctor/src/doctor-project";
 import {
   type ActivatedMaterializeProjectResult,
@@ -214,6 +215,44 @@ cli.command("doctor <project>", "Check a NodeValt npm project").action((project:
     if (!result.ok) {
       process.exitCode = 1;
     }
+  }),
+);
+
+cli.command("daemon <action>", "Manage NodeValt daemon").action((action: string) =>
+  run(async () => {
+    if (action !== "start") {
+      throw new Error(`Unsupported daemon action: ${action}`);
+    }
+
+    const config = await loadOrCreateConfig();
+    if (config.watchPaths.length === 0) {
+      console.log("No watch paths configured. Run: nodevalt scan <path>");
+      return;
+    }
+
+    const db = openNodeValtDatabase(config.storePath);
+    const daemon = await startDaemonWatcher({
+      config,
+      db,
+      onDirty: (projectPath) => {
+        console.log(`Dirty: ${toDisplayPath(projectPath)}`);
+      },
+    });
+
+    console.log("NodeValt daemon started");
+    console.log(`Watching: ${config.watchPaths.map(toDisplayPath).join(", ")}`);
+
+    await new Promise<void>((resolve) => {
+      const stop = () => {
+        resolve();
+      };
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    });
+
+    await daemon.close();
+    db.close();
+    console.log("NodeValt daemon stopped");
   }),
 );
 
