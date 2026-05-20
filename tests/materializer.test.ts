@@ -8,6 +8,7 @@ import {
   materializeNpmProject,
   materializeNpmProjectVirtual,
 } from "../packages/materializer/src/materialize-project";
+import { restoreProjectNodeModules } from "../packages/materializer/src/restore-project";
 
 const tmpRoots: string[] = [];
 
@@ -66,6 +67,41 @@ describe("materializeNpmProjectVirtual", () => {
       expect(nodeModulesStat.isSymbolicLink()).toBe(true);
       expect(result.backupPath).toEqual(expect.stringContaining("node_modules.nodevalt-backup-"));
       expect(await fs.pathExists(path.join(result.backupPath ?? "", "local.txt"))).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("restores the latest node_modules backup", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nodevalt-materializer-"));
+    tmpRoots.push(tmpRoot);
+
+    const projectPath = path.join(tmpRoot, "project");
+    await fs.copy(path.resolve("tests/fixtures/npm-basic"), projectPath);
+    await fs.ensureDir(path.join(projectPath, "node_modules"));
+    await fs.writeFile(path.join(projectPath, "node_modules", "local.txt"), "local");
+
+    const { storePath } = await initStore(path.join(tmpRoot, "store"));
+    const db = openNodeValtDatabase(storePath);
+
+    try {
+      await materializeNpmProject({
+        db,
+        storePath,
+        projectPath,
+      });
+
+      const result = await restoreProjectNodeModules({
+        db,
+        projectPath,
+      });
+
+      const nodeModulesStat = await fs.lstat(path.join(projectPath, "node_modules"));
+
+      expect(nodeModulesStat.isDirectory()).toBe(true);
+      expect(nodeModulesStat.isSymbolicLink()).toBe(false);
+      expect(await fs.readFile(path.join(projectPath, "node_modules", "local.txt"), "utf8")).toBe("local");
+      expect(await fs.pathExists(result.restoredFrom)).toBe(false);
     } finally {
       db.close();
     }

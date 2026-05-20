@@ -108,3 +108,22 @@ export function updateProjectMaterialization(
     now: new Date().toISOString(),
   });
 }
+
+export function updateProjectStatus(
+  db: Database.Database,
+  input: {
+    path: string;
+    status: string;
+  },
+): void {
+  db.prepare(`
+    UPDATE projects
+    SET
+      status = @status,
+      updated_at = @now
+    WHERE path = @path
+  `).run({
+    ...input,
+    now: new Date().toISOString(),
+  });
+}

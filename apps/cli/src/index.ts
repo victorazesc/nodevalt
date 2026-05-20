@@ -11,6 +11,7 @@ import {
   materializeNpmProject,
   materializeNpmProjectVirtual,
 } from "../../../packages/materializer/src/materialize-project";
+import { restoreProjectNodeModules } from "../../../packages/materializer/src/restore-project";
 import { scanProjects } from "../../../packages/scanner/src/scan";
 import { populateStoreFromNpmProject } from "../../../packages/store/src/populate-store";
 
@@ -169,6 +170,26 @@ cli
       }
     }),
   );
+
+cli.command("restore <project>", "Restore latest node_modules backup").action((project: string) =>
+  run(async () => {
+    const config = await loadOrCreateConfig();
+    const db = openNodeValtDatabase(config.storePath);
+
+    try {
+      const result = await restoreProjectNodeModules({
+        db,
+        projectPath: project,
+      });
+
+      console.log("Restored original node_modules from backup");
+      console.log(`Project: ${toDisplayPath(result.projectPath)}`);
+      console.log(`Restored from: ${toDisplayPath(result.restoredFrom)}`);
+    } finally {
+      db.close();
+    }
+  }),
+);
 
 cli.help();
 cli.version("0.1.0");
