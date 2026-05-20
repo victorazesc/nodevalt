@@ -5,7 +5,12 @@ import { formatBytes, toDisplayPath } from "../../../packages/core/src/paths";
 import { openNodeValtDatabase } from "../../../packages/database/src/db";
 import { getPackageCount } from "../../../packages/database/src/packages";
 import { getProjectStats, listProjects, upsertProject } from "../../../packages/database/src/projects";
-import { materializeNpmProjectVirtual } from "../../../packages/materializer/src/materialize-project";
+import {
+  type ActivatedMaterializeProjectResult,
+  type MaterializeProjectResult,
+  materializeNpmProject,
+  materializeNpmProjectVirtual,
+} from "../../../packages/materializer/src/materialize-project";
 import { scanProjects } from "../../../packages/scanner/src/scan";
 import { populateStoreFromNpmProject } from "../../../packages/store/src/populate-store";
 
@@ -126,18 +131,26 @@ cli.command("store <action> <project>", "Manage the global package store").actio
 
 cli
   .command("materialize <project>", "Create virtual node_modules for an npm project")
-  .option("--virtual-only", "Do not replace local node_modules", { default: true })
-  .action((project: string) =>
+  .option("--virtual-only", "Do not replace local node_modules")
+  .action((project: string, options: { virtualOnly?: boolean }) =>
     run(async () => {
       const config = await loadOrCreateConfig();
       const db = openNodeValtDatabase(config.storePath);
 
       try {
-        const result = await materializeNpmProjectVirtual({
+        const commandOptions = {
           db,
           storePath: config.storePath,
           projectPath: project,
-        });
+        };
+        let result: MaterializeProjectResult;
+        let activation: ActivatedMaterializeProjectResult | null = null;
+        if (options.virtualOnly) {
+          result = await materializeNpmProjectVirtual(commandOptions);
+        } else {
+          activation = await materializeNpmProject(commandOptions);
+          result = activation;
+        }
 
         console.log("Virtual node_modules created");
         console.log(`Project: ${toDisplayPath(result.projectPath)}`);
@@ -147,6 +160,10 @@ cli
         console.log(`Packages reused: ${result.packagesReused}`);
         console.log(`Packages skipped: ${result.packagesSkipped}`);
         console.log(`Packages linked: ${result.packagesLinked}`);
+        if (activation) {
+          console.log(`Local node_modules: ${toDisplayPath(activation.localNodeModulesPath)}`);
+          console.log(`Backup: ${activation.backupPath ? toDisplayPath(activation.backupPath) : "none"}`);
+        }
       } finally {
         db.close();
       }

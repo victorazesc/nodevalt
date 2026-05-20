@@ -4,6 +4,7 @@ import { getStorePaths, resolveUserPath } from "../../core/src/paths";
 import { updateProjectMaterialization } from "../../database/src/projects";
 import { parseNpmPackageLockFile } from "../../lockfile-parser/src/npm-parser";
 import { ensureNpmPackageInStore, type EnsurePackageResult } from "../../store/src/global-store";
+import { activateVirtualNodeModules } from "./activate-node-modules";
 import { createVirtualNodeModules, type LinkedPackage } from "./create-node-modules";
 import { getProjectMaterializationHash } from "./project-hash";
 
@@ -16,6 +17,34 @@ export interface MaterializeProjectResult {
   packagesSkipped: number;
   packagesLinked: number;
   linkedPackages: LinkedPackage[];
+}
+
+export interface ActivatedMaterializeProjectResult extends MaterializeProjectResult {
+  localNodeModulesPath: string;
+  backupPath: string | null;
+}
+
+export async function materializeNpmProject(options: {
+  db: Database.Database;
+  storePath: string;
+  projectPath: string;
+}): Promise<ActivatedMaterializeProjectResult> {
+  const result = await materializeNpmProjectVirtual(options);
+  const activation = await activateVirtualNodeModules({
+    projectPath: result.projectPath,
+    virtualNodeModulesPath: result.virtualNodeModulesPath,
+  });
+
+  updateProjectMaterialization(options.db, {
+    path: result.projectPath,
+    virtualNodeModulesPath: result.virtualNodeModulesPath,
+    status: "materialized",
+  });
+
+  return {
+    ...result,
+    ...activation,
+  };
 }
 
 export async function materializeNpmProjectVirtual(options: {
