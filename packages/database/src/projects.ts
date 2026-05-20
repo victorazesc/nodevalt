@@ -87,3 +87,24 @@ export function getProjectStats(db: Database.Database): {
 
   return row;
 }
+
+export function updateProjectMaterialization(
+  db: Database.Database,
+  input: {
+    path: string;
+    virtualNodeModulesPath: string;
+    status: string;
+  },
+): void {
+  db.prepare(`
+    UPDATE projects
+    SET
+      virtual_node_modules_path = @virtualNodeModulesPath,
+      status = @status,
+      updated_at = @now
+    WHERE path = @path
+  `).run({
+    ...input,
+    now: new Date().toISOString(),
+  });
+}

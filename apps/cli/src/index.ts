@@ -5,6 +5,7 @@ import { formatBytes, toDisplayPath } from "../../../packages/core/src/paths";
 import { openNodeValtDatabase } from "../../../packages/database/src/db";
 import { getPackageCount } from "../../../packages/database/src/packages";
 import { getProjectStats, listProjects, upsertProject } from "../../../packages/database/src/projects";
+import { materializeNpmProjectVirtual } from "../../../packages/materializer/src/materialize-project";
 import { scanProjects } from "../../../packages/scanner/src/scan";
 import { populateStoreFromNpmProject } from "../../../packages/store/src/populate-store";
 
@@ -122,6 +123,35 @@ cli.command("store <action> <project>", "Manage the global package store").actio
     }
   }),
 );
+
+cli
+  .command("materialize <project>", "Create virtual node_modules for an npm project")
+  .option("--virtual-only", "Do not replace local node_modules", { default: true })
+  .action((project: string) =>
+    run(async () => {
+      const config = await loadOrCreateConfig();
+      const db = openNodeValtDatabase(config.storePath);
+
+      try {
+        const result = await materializeNpmProjectVirtual({
+          db,
+          storePath: config.storePath,
+          projectPath: project,
+        });
+
+        console.log("Virtual node_modules created");
+        console.log(`Project: ${toDisplayPath(result.projectPath)}`);
+        console.log(`Virtual path: ${toDisplayPath(result.virtualNodeModulesPath)}`);
+        console.log(`Packages resolved: ${result.packagesResolved}`);
+        console.log(`Packages downloaded: ${result.packagesDownloaded}`);
+        console.log(`Packages reused: ${result.packagesReused}`);
+        console.log(`Packages skipped: ${result.packagesSkipped}`);
+        console.log(`Packages linked: ${result.packagesLinked}`);
+      } finally {
+        db.close();
+      }
+    }),
+  );
 
 cli.help();
 cli.version("0.1.0");
