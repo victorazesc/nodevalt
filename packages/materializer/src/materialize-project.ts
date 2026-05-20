@@ -5,6 +5,7 @@ import { updateProjectMaterialization } from "../../database/src/projects";
 import { parseNpmPackageLockFile } from "../../lockfile-parser/src/npm-parser";
 import { ensureNpmPackageInStore, type EnsurePackageResult } from "../../store/src/global-store";
 import { activateVirtualNodeModules } from "./activate-node-modules";
+import { createBinLinks, type LinkedBin } from "./create-bin-links";
 import { createVirtualNodeModules, type LinkedPackage } from "./create-node-modules";
 import { getProjectMaterializationHash } from "./project-hash";
 
@@ -16,7 +17,9 @@ export interface MaterializeProjectResult {
   packagesReused: number;
   packagesSkipped: number;
   packagesLinked: number;
+  binsLinked: number;
   linkedPackages: LinkedPackage[];
+  linkedBins: LinkedBin[];
 }
 
 export interface ActivatedMaterializeProjectResult extends MaterializeProjectResult {
@@ -67,7 +70,9 @@ export async function materializeNpmProjectVirtual(options: {
     packagesReused: 0,
     packagesSkipped: 0,
     packagesLinked: 0,
+    binsLinked: 0,
     linkedPackages: [],
+    linkedBins: [],
   };
 
   for (const pkg of lockfile.packages) {
@@ -86,6 +91,11 @@ export async function materializeNpmProjectVirtual(options: {
     storePackages,
   });
   result.packagesLinked = result.linkedPackages.length;
+  result.linkedBins = await createBinLinks({
+    virtualNodeModulesPath,
+    packages: lockfile.packages,
+  });
+  result.binsLinked = result.linkedBins.length;
 
   updateProjectMaterialization(options.db, {
     path: projectPath,

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initStore } from "../packages/core/src/config";
 import { openNodeValtDatabase } from "../packages/database/src/db";
+import { createBinLinks } from "../packages/materializer/src/create-bin-links";
 import {
   materializeNpmProject,
   materializeNpmProjectVirtual,
@@ -105,5 +106,42 @@ describe("materializeNpmProjectVirtual", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("creates .bin symlinks for top-level packages", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nodevalt-materializer-"));
+    tmpRoots.push(tmpRoot);
+
+    const virtualNodeModulesPath = path.join(tmpRoot, "node_modules");
+    await fs.ensureDir(path.join(virtualNodeModulesPath, "tool", "bin"));
+    await fs.writeFile(path.join(virtualNodeModulesPath, "tool", "bin", "tool.js"), "#!/usr/bin/env node\n");
+
+    const result = await createBinLinks({
+      virtualNodeModulesPath,
+      packages: [
+        {
+          packagePath: "node_modules/tool",
+          name: "tool",
+          version: "1.0.0",
+          resolved: null,
+          integrity: null,
+          dependencies: {},
+          devDependencies: {},
+          optionalDependencies: {},
+          peerDependencies: {},
+          bin: {
+            tool: "bin/tool.js",
+          },
+          dev: false,
+          optional: false,
+        },
+      ],
+    });
+
+    const binPath = path.join(virtualNodeModulesPath, ".bin", "tool");
+
+    expect(result).toHaveLength(1);
+    expect((await fs.lstat(binPath)).isSymbolicLink()).toBe(true);
+    expect(await fs.readlink(binPath)).toBe("../tool/bin/tool.js");
   });
 });

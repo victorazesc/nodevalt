@@ -161,6 +161,7 @@ cli
         console.log(`Packages reused: ${result.packagesReused}`);
         console.log(`Packages skipped: ${result.packagesSkipped}`);
         console.log(`Packages linked: ${result.packagesLinked}`);
+        console.log(`Bins linked: ${result.binsLinked}`);
         if (activation) {
           console.log(`Local node_modules: ${toDisplayPath(activation.localNodeModulesPath)}`);
           console.log(`Backup: ${activation.backupPath ? toDisplayPath(activation.backupPath) : "none"}`);
