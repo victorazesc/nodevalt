@@ -5,6 +5,7 @@ import { formatBytes, toDisplayPath } from "../../../packages/core/src/paths";
 import { openNodeValtDatabase } from "../../../packages/database/src/db";
 import { getPackageCount } from "../../../packages/database/src/packages";
 import { getProjectStats, listProjects, upsertProject } from "../../../packages/database/src/projects";
+import { doctorNpmProject } from "../../../packages/doctor/src/doctor-project";
 import {
   type ActivatedMaterializeProjectResult,
   type MaterializeProjectResult,
@@ -188,6 +189,30 @@ cli.command("restore <project>", "Restore latest node_modules backup").action((p
       console.log(`Restored from: ${toDisplayPath(result.restoredFrom)}`);
     } finally {
       db.close();
+    }
+  }),
+);
+
+cli.command("doctor <project>", "Check a NodeValt npm project").action((project: string) =>
+  run(async () => {
+    const config = await loadOrCreateConfig();
+    const result = await doctorNpmProject({
+      storePath: config.storePath,
+      projectPath: project,
+    });
+
+    console.log(`Project: ${toDisplayPath(result.projectPath)}`);
+    console.log(`Status: ${result.ok ? "ok" : "error"}`);
+
+    if (result.issues.length > 0) {
+      console.log("");
+      for (const issue of result.issues) {
+        console.log(`${issue.severity}: ${issue.code}: ${issue.message}`);
+      }
+    }
+
+    if (!result.ok) {
+      process.exitCode = 1;
     }
   }),
 );
