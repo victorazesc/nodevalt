@@ -26,10 +26,7 @@ export async function fetchPackageToStore(options: {
     await fs.ensureDir(extractPath);
     await execFileAsync("tar", ["-xzf", tarballPath, "-C", extractPath]);
 
-    const extractedPackagePath = path.join(extractPath, "package");
-    if (!(await fs.pathExists(extractedPackagePath))) {
-      throw new Error("Invalid package tarball: missing package directory");
-    }
+    const extractedPackagePath = await getExtractedPackagePath(extractPath);
 
     await fs.ensureDir(path.dirname(options.destinationPath));
     await fs.move(extractedPackagePath, options.destinationPath, {
@@ -38,6 +35,25 @@ export async function fetchPackageToStore(options: {
   } finally {
     await fs.remove(tmpRoot);
   }
+}
+
+async function getExtractedPackagePath(extractPath: string): Promise<string> {
+  const npmPackagePath = path.join(extractPath, "package");
+  if (await fs.pathExists(npmPackagePath)) {
+    return npmPackagePath;
+  }
+
+  if (await fs.pathExists(path.join(extractPath, "package.json"))) {
+    return extractPath;
+  }
+
+  const entries = await fs.readdir(extractPath, { withFileTypes: true });
+  const directories = entries.filter((entry) => entry.isDirectory());
+  if (directories.length === 1) {
+    return path.join(extractPath, directories[0].name);
+  }
+
+  throw new Error("Invalid package tarball: missing package directory");
 }
 
 async function downloadTarball(resolved: string): Promise<Buffer> {

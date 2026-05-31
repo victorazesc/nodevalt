@@ -18,7 +18,7 @@ export interface ScannedProject {
   lockfileHash: string | null;
   nodeModulesPath: string;
   nodeModulesSizeBytes: number;
-  status: "ready" | "unsupported" | "missing-lockfile";
+  status: "ready" | "unsupported" | "missing-lockfile" | "missing-node-modules";
   warnings: string[];
 }
 
@@ -65,9 +65,13 @@ async function walk(
   await Promise.all(
     entries
       .filter((entry) => entry.isDirectory())
-      .filter((entry) => !ignoredDirs.has(entry.name))
+      .filter((entry) => !isIgnoredDirectory(entry.name, ignoredDirs))
       .map((entry) => walk(path.join(currentPath, entry.name), ignoredDirs, projects)),
   );
+}
+
+function isIgnoredDirectory(name: string, ignoredDirs: Set<string>): boolean {
+  return ignoredDirs.has(name) || name.startsWith("node_modules.nodevalt-backup-");
 }
 
 async function readProject(projectPath: string): Promise<ScannedProject | null> {
@@ -83,6 +87,7 @@ async function readProject(projectPath: string): Promise<ScannedProject | null> 
   const detection = await detectPackageManager(projectPath, packageJson.packageManager);
   const lockfileHash = detection.lockfilePath ? await hashFile(detection.lockfilePath) : null;
   const nodeModulesPath = path.join(projectPath, "node_modules");
+  const hasNodeModules = await hasRootNodeModules(nodeModulesPath);
   const nodeModulesSizeBytes = await getDirectorySizeBytes(nodeModulesPath);
 
   return {
@@ -94,18 +99,35 @@ async function readProject(projectPath: string): Promise<ScannedProject | null> 
     lockfileHash,
     nodeModulesPath,
     nodeModulesSizeBytes,
-    status: getStatus(detection.packageManager, detection.lockfilePath),
+    status: getStatus(detection.packageManager, detection.lockfilePath, hasNodeModules),
     warnings: detection.warnings,
   };
 }
 
-function getStatus(packageManager: DetectedPackageManager, lockfilePath: string | null): ScannedProject["status"] {
-  if (packageManager !== "npm") {
+async function hasRootNodeModules(nodeModulesPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.lstat(nodeModulesPath);
+    return stat.isDirectory() || stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function getStatus(
+  packageManager: DetectedPackageManager,
+  lockfilePath: string | null,
+  hasNodeModules: boolean,
+): ScannedProject["status"] {
+  if (packageManager !== "npm" && packageManager !== "yarn") {
     return "unsupported";
   }
 
   if (!lockfilePath) {
     return "missing-lockfile";
+  }
+
+  if (!hasNodeModules) {
+    return "missing-node-modules";
   }
 
   return "ready";

@@ -3,6 +3,7 @@ import fs from "fs-extra";
 import type Database from "better-sqlite3";
 import { getStorePaths } from "../../core/src/paths";
 import { deletePackage, listPackages } from "../../database/src/packages";
+import { readNodeValtLinksManifest } from "../../materializer/src/nodevalt-manifest";
 import { getDirectorySizeBytes } from "../../scanner/src/size";
 
 export interface GarbageCollectResult {
@@ -46,7 +47,7 @@ async function collectReferencedStorePaths(storePath: string): Promise<Set<strin
     return referencedStorePaths;
   }
 
-  await walkSymlinks(projectsPath, referencedStorePaths);
+  await walkReferences(projectsPath, referencedStorePaths);
 
   return referencedStorePaths;
 }
@@ -59,7 +60,7 @@ async function normalizeExistingPath(inputPath: string): Promise<string> {
   }
 }
 
-async function walkSymlinks(currentPath: string, referencedStorePaths: Set<string>): Promise<void> {
+async function walkReferences(currentPath: string, referencedStorePaths: Set<string>): Promise<void> {
   let stat: fs.Stats;
   try {
     stat = await fs.lstat(currentPath);
@@ -80,6 +81,13 @@ async function walkSymlinks(currentPath: string, referencedStorePaths: Set<strin
     return;
   }
 
+  const manifest = await readNodeValtLinksManifest(currentPath);
+  if (manifest) {
+    for (const storePath of manifest.storePaths) {
+      referencedStorePaths.add(await normalizeExistingPath(storePath));
+    }
+  }
+
   const entries = await fs.readdir(currentPath);
-  await Promise.all(entries.map((entry) => walkSymlinks(path.join(currentPath, entry), referencedStorePaths)));
+  await Promise.all(entries.map((entry) => walkReferences(path.join(currentPath, entry), referencedStorePaths)));
 }

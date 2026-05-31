@@ -11,6 +11,7 @@ import {
   materializeNpmProject,
   materializeNpmProjectVirtual,
 } from "../packages/materializer/src/materialize-project";
+import { materializeInstalledNodeModules } from "../packages/materializer/src/materialize-installed-node-modules";
 import { restoreProjectNodeModules } from "../packages/materializer/src/restore-project";
 
 const tmpRoots: string[] = [];
@@ -22,7 +23,7 @@ afterEach(async () => {
 });
 
 describe("materializeNpmProjectVirtual", () => {
-  it("creates a virtual node_modules tree with package symlinks", async () => {
+  it("creates a virtual node_modules tree with package directories", async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nodevalt-materializer-"));
     tmpRoots.push(tmpRoot);
 
@@ -41,13 +42,13 @@ describe("materializeNpmProjectVirtual", () => {
       const stat = await fs.lstat(leftPadPath);
 
       expect(result.packagesLinked).toBe(1);
-      expect(stat.isSymbolicLink()).toBe(true);
+      expect(stat.isDirectory()).toBe(true);
     } finally {
       db.close();
     }
   });
 
-  it("backs up local node_modules and replaces it with a symlink", async () => {
+  it("backs up local node_modules and replaces it with a managed directory", async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nodevalt-materializer-"));
     tmpRoots.push(tmpRoot);
 
@@ -68,9 +69,51 @@ describe("materializeNpmProjectVirtual", () => {
 
       const nodeModulesStat = await fs.lstat(path.join(projectPath, "node_modules"));
 
-      expect(nodeModulesStat.isSymbolicLink()).toBe(true);
+      expect(nodeModulesStat.isDirectory()).toBe(true);
+      expect(nodeModulesStat.isSymbolicLink()).toBe(false);
+      expect(await fs.pathExists(path.join(projectPath, "node_modules", ".nodevalt.json"))).toBe(true);
       expect(result.backupPath).toEqual(expect.stringContaining("node_modules.nodevalt-backup-"));
       expect(await fs.pathExists(path.join(result.backupPath ?? "", "local.txt"))).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("materializes from an existing node_modules without downloading", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nodevalt-installed-materializer-"));
+    tmpRoots.push(tmpRoot);
+
+    const projectPath = path.join(tmpRoot, "project");
+    await fs.ensureDir(path.join(projectPath, "node_modules", "left-pad"));
+    await fs.writeJson(path.join(projectPath, "package.json"), {
+      name: "project",
+    });
+    await fs.writeJson(path.join(projectPath, "node_modules", "left-pad", "package.json"), {
+      name: "left-pad",
+      version: "1.3.0",
+    });
+    await fs.writeFile(path.join(projectPath, "node_modules", "left-pad", "index.js"), "module.exports = () => null;\n");
+
+    const { storePath } = await initStore(path.join(tmpRoot, "store"));
+    const db = openNodeValtDatabase(storePath);
+
+    try {
+      const result = await materializeInstalledNodeModules({
+        db,
+        storePath,
+        projectPath,
+      });
+
+      const nodeModulesStat = await fs.lstat(path.join(projectPath, "node_modules"));
+      const virtualPackageStat = await fs.lstat(path.join(result.virtualNodeModulesPath, "left-pad"));
+
+      expect(result.packagesCopied).toBe(1);
+      expect(result.packagesLinked).toBe(1);
+      expect(nodeModulesStat.isDirectory()).toBe(true);
+      expect(nodeModulesStat.isSymbolicLink()).toBe(false);
+      expect(await fs.pathExists(path.join(projectPath, "node_modules", ".nodevalt.json"))).toBe(true);
+      expect(virtualPackageStat.isDirectory()).toBe(true);
+      expect(await fs.pathExists(path.join(result.backupPath ?? "", "left-pad", "index.js"))).toBe(true);
     } finally {
       db.close();
     }

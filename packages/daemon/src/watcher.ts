@@ -5,7 +5,7 @@ import type Database from "better-sqlite3";
 import type { NodeValtConfig } from "../../core/src/config";
 import { hashString } from "../../core/src/paths";
 import { insertEvent } from "../../database/src/events";
-import { updateProjectStatus } from "../../database/src/projects";
+import { listProjects, updateProjectStatus } from "../../database/src/projects";
 
 const RELEVANT_FILES = new Set([
   "package.json",
@@ -18,6 +18,7 @@ const RELEVANT_FILES = new Set([
 
 export interface DaemonWatcher {
   watcher: FSWatcher;
+  watchedProjectCount: number;
   close: () => Promise<void>;
 }
 
@@ -25,10 +26,13 @@ export async function startDaemonWatcher(options: {
   config: NodeValtConfig;
   db: Database.Database;
   onDirty?: (projectPath: string) => void;
+  onError?: (error: Error) => void;
 }): Promise<DaemonWatcher> {
   const debounceTimers = new Map<string, NodeJS.Timeout>();
   const ignoredDirs = new Set(options.config.ignoredDirs);
-  const watcher = chokidar.watch(options.config.watchPaths, {
+  const projects = listProjects(options.db);
+  const watchFiles = getDaemonWatchFiles(projects.map((project) => project.path));
+  const watcher = chokidar.watch(watchFiles, {
     ignoreInitial: true,
     ignored: (filePath) => isIgnoredPath(filePath.toString(), ignoredDirs),
   });
@@ -80,9 +84,13 @@ export async function startDaemonWatcher(options: {
   watcher.on("unlink", (filePath) => {
     void handleEvent("unlink", filePath);
   });
+  watcher.on("error", (error) => {
+    options.onError?.(error instanceof Error ? error : new Error(String(error)));
+  });
 
   return {
     watcher,
+    watchedProjectCount: projects.length,
     close: async () => {
       for (const timer of debounceTimers.values()) {
         clearTimeout(timer);
@@ -91,6 +99,17 @@ export async function startDaemonWatcher(options: {
       await watcher.close();
     },
   };
+}
+
+export function getDaemonWatchFiles(projectPaths: string[]): string[] {
+  const watchFiles = new Set<string>();
+  for (const projectPath of projectPaths) {
+    for (const fileName of RELEVANT_FILES) {
+      watchFiles.add(path.join(projectPath, fileName));
+    }
+  }
+
+  return [...watchFiles];
 }
 
 export function isRelevantDaemonFile(filePath: string): boolean {

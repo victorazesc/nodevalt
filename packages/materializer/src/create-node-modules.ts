@@ -2,6 +2,8 @@ import path from "node:path";
 import fs from "fs-extra";
 import type { ParsedNpmPackage } from "../../lockfile-parser/src/types";
 import type { EnsurePackageResult } from "../../store/src/global-store";
+import { linkPackageTree } from "./link-package-tree";
+import { writeNodeValtLinksManifest } from "./nodevalt-manifest";
 
 export interface LinkedPackage {
   name: string;
@@ -35,7 +37,7 @@ export async function createVirtualNodeModules(options: {
     const linkPath = path.join(options.virtualNodeModulesPath, relativePackagePath);
     await fs.ensureDir(path.dirname(linkPath));
     await fs.remove(linkPath);
-    await fs.symlink(storePackage.storePath, linkPath, "dir");
+    await linkPackageTree(storePackage.storePath, linkPath);
 
     linkedPackages.push({
       name: pkg.name,
@@ -45,6 +47,11 @@ export async function createVirtualNodeModules(options: {
       targetPath: storePackage.storePath,
     });
   }
+
+  await writeNodeValtLinksManifest(
+    options.virtualNodeModulesPath,
+    linkedPackages.map((pkg) => pkg.targetPath),
+  );
 
   return linkedPackages;
 }

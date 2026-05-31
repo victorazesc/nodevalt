@@ -23,3 +23,36 @@ npm run dev -- doctor ./app
 npm run dev -- gc
 npm run dev -- daemon start
 ```
+
+Instalacao global via GitHub:
+
+```bash
+npm install -g github:victorazesc/nodevalt
+nodevalt init
+nodevalt daemon install
+nodevalt daemon status
+```
+
+Daemon automatico:
+
+```bash
+npm run dev -- daemon start
+```
+
+Ao iniciar, ele escaneia os paths configurados, materializa projetos npm/yarn que ja possuem `node_modules` na raiz, troca o `node_modules` real por uma arvore local gerenciada com hardlinks/copia e backup, observa mudancas em `package.json`/lockfile e repete o scan a cada 60s.
+
+Opcoes:
+
+```bash
+npm run dev -- daemon start --path ~/projetos --scan-interval 30
+npm run dev -- daemon start --no-auto-materialize
+```
+
+Rodando como observer do macOS:
+
+```bash
+npm run build
+npm run dev -- daemon install
+npm run dev -- daemon status
+npm run dev -- daemon uninstall
+```

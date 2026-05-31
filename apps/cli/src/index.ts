@@ -1,11 +1,17 @@
 #!/usr/bin/env node
+import { execFile } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import type Database from "better-sqlite3";
 import { cac } from "cac";
-import { addWatchPath, initStore, loadOrCreateConfig } from "../../../packages/core/src/config";
-import { formatBytes, toDisplayPath } from "../../../packages/core/src/paths";
+import fs from "fs-extra";
+import { addWatchPath, initStore, loadOrCreateConfig, type NodeValtConfig } from "../../../packages/core/src/config";
+import { formatBytes, getStorePaths, toDisplayPath } from "../../../packages/core/src/paths";
 import { openNodeValtDatabase } from "../../../packages/database/src/db";
 import { getPackageCount } from "../../../packages/database/src/packages";
-import { getProjectStats, listProjects, upsertProject } from "../../../packages/database/src/projects";
-import { startDaemonWatcher } from "../../../packages/daemon/src/watcher";
+import { getProjectStats, listProjects, type ProjectRow, upsertProject } from "../../../packages/database/src/projects";
+import { getDaemonWatchFiles, startDaemonWatcher, type DaemonWatcher } from "../../../packages/daemon/src/watcher";
 import { doctorNpmProject } from "../../../packages/doctor/src/doctor-project";
 import { collectGarbage } from "../../../packages/gc/src/garbage-collector";
 import {
@@ -14,11 +20,14 @@ import {
   materializeNpmProject,
   materializeNpmProjectVirtual,
 } from "../../../packages/materializer/src/materialize-project";
+import { materializeInstalledNodeModules } from "../../../packages/materializer/src/materialize-installed-node-modules";
 import { restoreProjectNodeModules } from "../../../packages/materializer/src/restore-project";
-import { scanProjects } from "../../../packages/scanner/src/scan";
+import { scanProjects, type ScannedProject } from "../../../packages/scanner/src/scan";
 import { populateStoreFromNpmProject } from "../../../packages/store/src/populate-store";
 
 const cli = cac("nodevalt");
+const execFileAsync = promisify(execFile);
+const LAUNCH_AGENT_LABEL = "com.nodevalt.daemon";
 
 function run(action: () => Promise<void>): void {
   action().catch((error: unknown) => {
@@ -82,6 +91,7 @@ cli.command("status", "Show NodeValt status").action(() =>
     const packageCount = getPackageCount(db);
     const projects = listProjects(db);
     db.close();
+    const daemonStatus = await getDaemonLaunchAgentStatus();
 
     console.log("NodeValt status");
     console.log("");
@@ -91,7 +101,7 @@ cli.command("status", "Show NodeValt status").action(() =>
     console.log(`Packages in store: ${packageCount}`);
     console.log("Package instances: 0");
     console.log("Estimated disk saved: 0 B");
-    console.log("Daemon: not running");
+    console.log(`Daemon: ${daemonStatus}`);
 
     if (projects.length > 0) {
       console.log("");
@@ -238,43 +248,398 @@ cli.command("gc", "Remove unreferenced packages from the global store").action((
   }),
 );
 
-cli.command("daemon <action>", "Manage NodeValt daemon").action((action: string) =>
-  run(async () => {
-    if (action !== "start") {
-      throw new Error(`Unsupported daemon action: ${action}`);
-    }
-
-    const config = await loadOrCreateConfig();
-    if (config.watchPaths.length === 0) {
-      console.log("No watch paths configured. Run: nodevalt scan <path>");
-      return;
-    }
-
-    const db = openNodeValtDatabase(config.storePath);
-    const daemon = await startDaemonWatcher({
-      config,
-      db,
-      onDirty: (projectPath) => {
-        console.log(`Dirty: ${toDisplayPath(projectPath)}`);
+cli
+  .command("daemon <action>", "Manage NodeValt daemon")
+  .option("--path <path>", "Path to scan/watch")
+  .option("--scan-interval <seconds>", "Periodic scan interval in seconds", { default: "60" })
+  .option("--no-auto-materialize", "Scan/watch without replacing node_modules")
+  .action(
+    (
+      action: string,
+      options: {
+        path?: string;
+        scanInterval?: string;
+        autoMaterialize?: boolean;
       },
+    ) =>
+      run(async () => {
+        const config = await loadOrCreateConfig();
+        if (action === "install") {
+          await installDaemonLaunchAgent(config, options);
+          return;
+        }
+
+        if (action === "uninstall") {
+          await uninstallDaemonLaunchAgent();
+          return;
+        }
+
+        if (action === "status") {
+          await showDaemonLaunchAgentStatus();
+          return;
+        }
+
+        if (action !== "start") {
+          throw new Error(`Unsupported daemon action: ${action}`);
+        }
+
+        await ensureDaemonWatchPath(config, options.path);
+
+        const db = openNodeValtDatabase(config.storePath);
+        let daemon: DaemonWatcher | null = null;
+        let runningCycle: Promise<void> | null = null;
+        let stopRequested = false;
+        let resolveStop: () => void;
+        const stopPromise = new Promise<void>((resolve) => {
+          resolveStop = resolve;
+        });
+        const stop = () => {
+          stopRequested = true;
+          resolveStop();
+        };
+        const scanIntervalMs = parseScanIntervalMs(options.scanInterval);
+        const autoMaterialize = options.autoMaterialize !== false;
+
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+
+        const runCycle = (reason: string): Promise<void> => {
+          if (runningCycle) {
+            return runningCycle;
+          }
+
+          runningCycle = runDaemonCycle({
+            config,
+            db,
+            daemon,
+            reason,
+            autoMaterialize,
+            shouldStop: () => stopRequested,
+          }).finally(() => {
+            runningCycle = null;
+          });
+
+          return runningCycle;
+        };
+
+        await runCycle("initial");
+        if (stopRequested) {
+          db.close();
+          console.log("NodeValt daemon stopped");
+          return;
+        }
+
+        daemon = await startDaemonWatcher({
+          config,
+          db,
+          onDirty: (projectPath) => {
+            console.log(`Dirty: ${toDisplayPath(projectPath)}`);
+            void runCycle("change");
+          },
+          onError: (error) => {
+            console.error(`Watcher error: ${error.message}`);
+          },
+        });
+
+        if (daemon.watchedProjectCount === 0) {
+          console.log("No npm projects with package-lock.json found.");
+          await daemon.close();
+          db.close();
+          return;
+        }
+
+        const interval = setInterval(() => {
+          void runCycle("interval");
+        }, scanIntervalMs);
+
+        console.log("NodeValt daemon started");
+        console.log(`Watching: ${config.watchPaths.map(toDisplayPath).join(", ")}`);
+        console.log(`Tracked projects: ${daemon.watchedProjectCount}`);
+        console.log(`Auto materialize: ${autoMaterialize ? "on" : "off"}`);
+        console.log(`Scan interval: ${Math.round(scanIntervalMs / 1000)}s`);
+
+        await stopPromise;
+
+        clearInterval(interval);
+        await runningCycle;
+        await daemon.close();
+        db.close();
+        console.log("NodeValt daemon stopped");
+      }),
+  );
+
+async function ensureDaemonWatchPath(config: NodeValtConfig, watchPathInput?: string): Promise<void> {
+  if (watchPathInput) {
+    await addWatchPath(config, watchPathInput);
+    return;
+  }
+
+  if (config.watchPaths.length > 0) {
+    return;
+  }
+
+  await addWatchPath(config, await getDefaultDaemonWatchPath());
+}
+
+async function getDefaultDaemonWatchPath(): Promise<string> {
+  const projectsPath = path.join(os.homedir(), "projetos");
+  if (await fs.pathExists(projectsPath)) {
+    return projectsPath;
+  }
+
+  return process.cwd();
+}
+
+function parseScanIntervalMs(value?: string): number {
+  const seconds = Number(value ?? "60");
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error("scan interval must be a positive number");
+  }
+
+  return seconds * 1000;
+}
+
+async function runDaemonCycle(options: {
+  config: NodeValtConfig;
+  db: Database.Database;
+  daemon: DaemonWatcher | null;
+  reason: string;
+  autoMaterialize: boolean;
+  shouldStop: () => boolean;
+}): Promise<void> {
+  const projects = await scanConfiguredWatchPaths(options.config, options.db);
+  options.daemon?.watcher.add(getDaemonWatchFiles(projects.map((project) => project.path)));
+
+  console.log(`[${options.reason}] scanned ${projects.length} projects`);
+
+  if (!options.autoMaterialize || options.shouldStop()) {
+    return;
+  }
+
+  const materialized = await materializePendingProjects(options.db, options.config.storePath, options.shouldStop);
+  if (materialized > 0) {
+    console.log(`[${options.reason}] materialized ${materialized} projects`);
+  }
+}
+
+async function scanConfiguredWatchPaths(config: NodeValtConfig, db: Database.Database): Promise<ScannedProject[]> {
+  const existingProjects = new Map(listProjects(db).map((project) => [project.path, project]));
+  const scannedProjects = new Map<string, ScannedProject>();
+
+  for (const watchPath of config.watchPaths) {
+    const projects = await scanProjects(watchPath, {
+      ignoredDirs: config.ignoredDirs,
     });
+    for (const project of projects) {
+      scannedProjects.set(project.path, project);
+    }
+  }
 
-    console.log("NodeValt daemon started");
-    console.log(`Watching: ${config.watchPaths.map(toDisplayPath).join(", ")}`);
-
-    await new Promise<void>((resolve) => {
-      const stop = () => {
-        resolve();
-      };
-      process.once("SIGINT", stop);
-      process.once("SIGTERM", stop);
+  for (const project of scannedProjects.values()) {
+    upsertProject(db, {
+      ...project,
+      status: getNextProjectStatus(project, existingProjects.get(project.path)),
     });
+  }
 
-    await daemon.close();
-    db.close();
-    console.log("NodeValt daemon stopped");
-  }),
-);
+  return [...scannedProjects.values()];
+}
+
+function getNextProjectStatus(project: ScannedProject, existingProject?: ProjectRow): string {
+  if (
+    existingProject &&
+    (existingProject.status === "materialized" || existingProject.status === "virtualized") &&
+    existingProject.lockfile_hash === project.lockfileHash
+  ) {
+    return existingProject.status;
+  }
+
+  return project.status;
+}
+
+async function materializePendingProjects(
+  db: Database.Database,
+  storePath: string,
+  shouldStop: () => boolean,
+): Promise<number> {
+  const projects = listProjects(db).filter((project) => {
+    return (
+      !isDaemonOwnProject(project) &&
+      ["npm", "yarn"].includes(project.package_manager) &&
+      project.lockfile_path &&
+      ["ready", "dirty"].includes(project.status)
+    );
+  });
+
+  let materialized = 0;
+  for (const project of projects) {
+    if (shouldStop()) {
+      break;
+    }
+
+    try {
+      console.log(`Materializing: ${project.name ?? toDisplayPath(project.path)}`);
+      const result = await materializeInstalledNodeModules({
+        db,
+        storePath,
+        projectPath: project.path,
+      });
+      console.log(
+        `  linked: ${result.packagesLinked}, copied: ${result.packagesCopied}, reused: ${result.packagesReused}`,
+      );
+      materialized += 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Materialize failed: ${project.name ?? toDisplayPath(project.path)}: ${message}`);
+    }
+  }
+
+  return materialized;
+}
+
+function isDaemonOwnProject(project: ProjectRow): boolean {
+  return project.name === "nodevalt" && path.resolve(project.path) === process.cwd();
+}
+
+async function installDaemonLaunchAgent(
+  config: NodeValtConfig,
+  options: {
+    path?: string;
+    scanInterval?: string;
+    autoMaterialize?: boolean;
+  },
+): Promise<void> {
+  await ensureDaemonWatchPath(config, options.path);
+
+  const cliEntryPoint = path.join(process.cwd(), "dist", "cli", "index.js");
+  if (!(await fs.pathExists(cliEntryPoint))) {
+    throw new Error("Build the CLI before installing the daemon: npm run build");
+  }
+
+  const storePaths = getStorePaths(config.storePath);
+  await fs.ensureDir(storePaths.logs);
+  await fs.ensureDir(path.dirname(getLaunchAgentPath()));
+
+  const programArguments = [
+    process.execPath,
+    cliEntryPoint,
+    "daemon",
+    "start",
+    "--scan-interval",
+    String(Math.round(parseScanIntervalMs(options.scanInterval) / 1000)),
+  ];
+  if (options.autoMaterialize === false) {
+    programArguments.push("--no-auto-materialize");
+  }
+
+  const plist = createLaunchAgentPlist({
+    programArguments,
+    workingDirectory: process.cwd(),
+    stdoutPath: path.join(storePaths.logs, "daemon.out.log"),
+    stderrPath: path.join(storePaths.logs, "daemon.err.log"),
+  });
+  const plistPath = getLaunchAgentPath();
+
+  await fs.writeFile(plistPath, plist);
+  await launchctl(["bootout", getLaunchAgentDomain(), plistPath], true);
+  await launchctl(["bootstrap", getLaunchAgentDomain(), plistPath]);
+  await launchctl(["kickstart", "-k", `${getLaunchAgentDomain()}/${LAUNCH_AGENT_LABEL}`]);
+
+  console.log("NodeValt daemon installed and started");
+  console.log(`LaunchAgent: ${toDisplayPath(plistPath)}`);
+  console.log(`Watching: ${config.watchPaths.map(toDisplayPath).join(", ")}`);
+  console.log(`Logs: ${toDisplayPath(storePaths.logs)}`);
+}
+
+async function uninstallDaemonLaunchAgent(): Promise<void> {
+  const plistPath = getLaunchAgentPath();
+
+  await launchctl(["bootout", getLaunchAgentDomain(), plistPath], true);
+  await fs.remove(plistPath);
+
+  console.log("NodeValt daemon uninstalled");
+}
+
+async function showDaemonLaunchAgentStatus(): Promise<void> {
+  console.log(`NodeValt daemon: ${await getDaemonLaunchAgentStatus()}`);
+}
+
+async function getDaemonLaunchAgentStatus(): Promise<string> {
+  try {
+    const { stdout } = await launchctl(["print", `${getLaunchAgentDomain()}/${LAUNCH_AGENT_LABEL}`]);
+    const pid = stdout.match(/pid = (\d+)/)?.[1] ?? "not running";
+    return `loaded (${pid})`;
+  } catch {
+    return "not loaded";
+  }
+}
+
+function createLaunchAgentPlist(options: {
+  programArguments: string[];
+  workingDirectory: string;
+  stdoutPath: string;
+  stderrPath: string;
+}): string {
+  const args = options.programArguments.map((arg) => `    <string>${escapeXml(arg)}</string>`).join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCH_AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+${args}
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${escapeXml(options.workingDirectory)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${escapeXml(options.stdoutPath)}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapeXml(options.stderrPath)}</string>
+</dict>
+</plist>
+`;
+}
+
+function getLaunchAgentPath(): string {
+  return path.join(os.homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
+}
+
+function getLaunchAgentDomain(): string {
+  const uid = process.getuid?.();
+  if (uid === undefined) {
+    throw new Error("LaunchAgent is only supported on Unix-like systems");
+  }
+
+  return `gui/${uid}`;
+}
+
+async function launchctl(args: string[], ignoreFailure = false): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await execFileAsync("launchctl", args);
+  } catch (error) {
+    if (ignoreFailure) {
+      return { stdout: "", stderr: "" };
+    }
+
+    throw error;
+  }
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
 
 cli.help();
 cli.version("0.1.0");

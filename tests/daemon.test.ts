@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getProjectPathForEvent, isRelevantDaemonFile } from "../packages/daemon/src/watcher";
+import { getDaemonWatchFiles, getProjectPathForEvent, isRelevantDaemonFile } from "../packages/daemon/src/watcher";
 
 const tmpRoots: string[] = [];
 
@@ -15,7 +15,16 @@ describe("daemon watcher helpers", () => {
   it("detects relevant package files", () => {
     expect(isRelevantDaemonFile("/tmp/app/package.json")).toBe(true);
     expect(isRelevantDaemonFile("/tmp/app/package-lock.json")).toBe(true);
+    expect(isRelevantDaemonFile("/tmp/app/pnpm-lock.yaml")).toBe(true);
     expect(isRelevantDaemonFile("/tmp/app/src/index.ts")).toBe(false);
+  });
+
+  it("builds watch file list from scanned projects", () => {
+    const files = getDaemonWatchFiles(["/tmp/app"]);
+
+    expect(files).toContain("/tmp/app/package.json");
+    expect(files).toContain("/tmp/app/package-lock.json");
+    expect(files).toContain("/tmp/app/pnpm-lock.yaml");
   });
 
   it("resolves project path from lockfile event", async () => {

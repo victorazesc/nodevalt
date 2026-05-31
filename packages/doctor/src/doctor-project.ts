@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "fs-extra";
 import { hashFile, resolveUserPath } from "../../core/src/paths";
 import { parseNpmPackageLockFile } from "../../lockfile-parser/src/npm-parser";
+import { isNodeValtManagedNodeModules } from "../../materializer/src/activate-node-modules";
 import { getPackageStorePath } from "../../store/src/package-paths";
 
 export type DoctorSeverity = "error" | "warning";
@@ -86,11 +87,16 @@ async function checkNodeModules(nodeModulesPath: string, issues: DoctorIssue[]):
 
   const stat = await fs.lstat(nodeModulesPath);
   if (!stat.isSymbolicLink()) {
-    issues.push({
-      severity: "warning",
-      code: "node-modules-not-virtual",
-      message: "node_modules exists but is not a symlink managed by NodeValt",
-    });
+    if (!(stat.isDirectory() && (await isNodeValtManagedNodeModules(nodeModulesPath)))) {
+      issues.push({
+        severity: "warning",
+        code: "node-modules-not-managed",
+        message: "node_modules exists but is not managed by NodeValt",
+      });
+      return;
+    }
+
+    await collectBrokenSymlinks(nodeModulesPath, issues);
     return;
   }
 

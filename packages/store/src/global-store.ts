@@ -7,6 +7,9 @@ import { upsertPackage } from "../../database/src/packages";
 import { fetchPackageToStore } from "./package-fetcher";
 import { getPackageContentId, getPackageStorePath, type StorePackageRef } from "./package-paths";
 
+const LOCK_STALE_MS = 60 * 1000;
+const LOCK_WAIT_MS = 100;
+
 export interface EnsurePackageResult {
   id: string;
   name: string;
@@ -82,11 +85,57 @@ function toStorePackageRef(pkg: ParsedNpmPackage): StorePackageRef {
 async function withFileLock<T>(lockPath: string, action: () => Promise<T>): Promise<T> {
   await fs.ensureDir(path.dirname(lockPath));
 
-  const lockHandle = await nodeFs.open(lockPath, "wx");
+  const lockHandle = await acquireFileLock(lockPath);
   try {
     return await action();
   } finally {
     await lockHandle.close();
     await fs.remove(lockPath);
   }
+}
+
+async function acquireFileLock(lockPath: string) {
+  while (true) {
+    try {
+      return await nodeFs.open(lockPath, "wx");
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "EEXIST") {
+        throw error;
+      }
+
+      if (await removeStaleLock(lockPath)) {
+        continue;
+      }
+
+      await sleep(LOCK_WAIT_MS);
+    }
+  }
+}
+
+async function removeStaleLock(lockPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(lockPath);
+    if (Date.now() - stat.mtimeMs <= LOCK_STALE_MS) {
+      return false;
+    }
+
+    await fs.remove(lockPath);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return true;
+    }
+
+    throw error;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }

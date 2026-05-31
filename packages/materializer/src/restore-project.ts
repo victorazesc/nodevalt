@@ -3,6 +3,7 @@ import fs from "fs-extra";
 import type Database from "better-sqlite3";
 import { resolveUserPath } from "../../core/src/paths";
 import { updateProjectStatus } from "../../database/src/projects";
+import { isNodeValtManagedNodeModules } from "./activate-node-modules";
 
 export interface RestoreProjectResult {
   projectPath: string;
@@ -24,8 +25,9 @@ export async function restoreProjectNodeModules(options: {
 
   if (await fs.pathExists(nodeModulesPath)) {
     const stat = await fs.lstat(nodeModulesPath);
-    if (!stat.isSymbolicLink()) {
-      throw new Error("Cannot restore because node_modules exists and is not a symlink");
+    const canRemove = stat.isSymbolicLink() || (stat.isDirectory() && (await isNodeValtManagedNodeModules(nodeModulesPath)));
+    if (!canRemove) {
+      throw new Error("Cannot restore because node_modules exists and is not managed by NodeValt");
     }
 
     await fs.remove(nodeModulesPath);

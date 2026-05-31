@@ -7,6 +7,7 @@ import { getStorePaths } from "../packages/core/src/paths";
 import { openNodeValtDatabase } from "../packages/database/src/db";
 import { getPackageCount, upsertPackage } from "../packages/database/src/packages";
 import { collectGarbage } from "../packages/gc/src/garbage-collector";
+import { writeNodeValtLinksManifest } from "../packages/materializer/src/nodevalt-manifest";
 
 const tmpRoots: string[] = [];
 
@@ -30,7 +31,8 @@ describe("collectGarbage", () => {
 
     const virtualNodeModulesPath = path.join(getStorePaths(storePath).projects, "project", "node_modules");
     await fs.ensureDir(virtualNodeModulesPath);
-    await fs.symlink(usedPackagePath, path.join(virtualNodeModulesPath, "used"), "dir");
+    await fs.copy(usedPackagePath, path.join(virtualNodeModulesPath, "used"));
+    await writeNodeValtLinksManifest(virtualNodeModulesPath, [usedPackagePath]);
 
     const db = openNodeValtDatabase(storePath);
     try {
