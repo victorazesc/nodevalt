@@ -2,6 +2,8 @@
 
 Daemon/CLI local para reduzir duplicacao de `node_modules` entre projetos Node.js.
 
+Site: https://victorazesc.github.io/nodevalt/
+
 MVP atual:
 
 - `nodevalt init`

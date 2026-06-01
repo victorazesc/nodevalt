@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="NodeValt reduz duplicacao de node_modules com store local, materializacao segura e observer para projetos Node.js."
+    />
+    <meta property="og:title" content="NodeValt" />
+    <meta
+      property="og:description"
+      content="Um CLI local-first para economizar disco e manter dependencias Node.js sob controle."
+    />
+    <meta property="og:image" content="assets/hero-nodevalt.png" />
+    <title>NodeValt - node_modules sob controle</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="NodeValt inicio">
+        <span class="brand-mark" aria-hidden="true">N</span>
+        <span>NodeValt</span>
+      </a>
+      <nav class="nav-links" aria-label="Navegacao principal">
+        <a href="#como-funciona">Como funciona</a>
+        <a href="#instalar">Instalar</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="header-action" href="https://github.com/victorazesc/nodevalt">GitHub</a>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-bg" aria-hidden="true"></div>
+        <div class="hero-overlay" aria-hidden="true"></div>
+        <div class="hero-content">
+          <p class="eyebrow">CLI local-first para projetos Node.js</p>
+          <h1 id="hero-title">NodeValt</h1>
+          <p class="hero-copy">
+            Reduza a repeticao de <code>node_modules</code> entre projetos com store global,
+            materializacao segura, backups e um observer discreto no macOS.
+          </p>
+          <div class="hero-actions" aria-label="Acoes principais">
+            <a class="button primary" href="#instalar">Instalar agora</a>
+            <a class="button secondary" href="https://github.com/victorazesc/nodevalt">Ver codigo</a>
+          </div>
+          <div class="hero-stats" aria-label="Resumo do produto">
+            <span><strong>npm</strong> lockfile v2/v3</span>
+            <span><strong>hardlinks</strong> e backup</span>
+            <span><strong>daemon</strong> para macOS</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section intro" aria-labelledby="intro-title">
+        <div class="section-inner split">
+          <div>
+            <p class="eyebrow">Problema</p>
+            <h2 id="intro-title">Cada projeto guarda o mesmo peso de novo.</h2>
+          </div>
+          <p>
+            NodeValt troca o desperdicio por um fluxo local controlado: escaneia projetos,
+            popula um store global, materializa dependencias sob demanda e valida o estado com
+            <code>doctor</code>.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="como-funciona" aria-labelledby="flow-title">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Fluxo</p>
+            <h2 id="flow-title">O ciclo que mantem tudo reversivel.</h2>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card">
+              <span class="step">01</span>
+              <h3>Escaneia</h3>
+              <p>Mapeia projetos Node.js e lockfiles sem assumir controle de repos que nao usam Node.</p>
+            </article>
+            <article class="feature-card">
+              <span class="step">02</span>
+              <h3>Popula o store</h3>
+              <p>Baixa pacotes resolvidos no lockfile e guarda conteudo em um diretorio global local.</p>
+            </article>
+            <article class="feature-card">
+              <span class="step">03</span>
+              <h3>Materializa seguro</h3>
+              <p>Cria a arvore gerenciada com hardlinks ou copia e preserva backup do estado anterior.</p>
+            </article>
+            <article class="feature-card">
+              <span class="step">04</span>
+              <h3>Observa</h3>
+              <p>O daemon acompanha mudancas relevantes e repete o scan em intervalos configuraveis.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section install-band" id="instalar" aria-labelledby="install-title">
+        <div class="section-inner install-layout">
+          <div>
+            <p class="eyebrow">Instalacao</p>
+            <h2 id="install-title">Comece pelo global install.</h2>
+            <p>
+              Instale do GitHub, inicialize o store e deixe o observer rodando quando fizer sentido.
+            </p>
+          </div>
+          <div class="terminal" aria-label="Comandos de instalacao">
+            <div class="terminal-bar">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <pre><code>npm install -g github:victorazesc/nodevalt
+nodevalt init
+nodevalt daemon install
+nodevalt daemon status</code></pre>
+            <button class="copy-button" type="button" data-copy="npm install -g github:victorazesc/nodevalt&#10;nodevalt init&#10;nodevalt daemon install&#10;nodevalt daemon status">
+              Copiar
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="commands-title">
+        <div class="section-inner">
+          <div class="section-heading compact">
+            <p class="eyebrow">Comandos</p>
+            <h2 id="commands-title">Superficie pequena, util no dia a dia.</h2>
+          </div>
+          <div class="command-list">
+            <div><code>nodevalt scan ~/projetos</code><span>descobre projetos candidatos</span></div>
+            <div><code>nodevalt store populate ./app</code><span>preenche o store global</span></div>
+            <div><code>nodevalt materialize ./app</code><span>ativa a arvore gerenciada</span></div>
+            <div><code>nodevalt restore ./app</code><span>volta para o backup local</span></div>
+            <div><code>nodevalt doctor ./app</code><span>valida links, store e estado</span></div>
+            <div><code>nodevalt gc</code><span>remove pacotes nao usados</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section faq" id="faq" aria-labelledby="faq-title">
+        <div class="section-inner">
+          <div class="section-heading compact">
+            <p class="eyebrow">FAQ</p>
+            <h2 id="faq-title">Promessa simples.</h2>
+          </div>
+          <div class="faq-list">
+            <details>
+              <summary>Ele substitui npm ou yarn?</summary>
+              <p>Nao. Ele trabalha em volta do lockfile e do <code>node_modules</code> local.</p>
+            </details>
+            <details>
+              <summary>Da para desfazer?</summary>
+              <p>Sim. A materializacao preserva backup e o comando <code>restore</code> volta o projeto.</p>
+            </details>
+            <details>
+              <summary>Onde ficam os dados?</summary>
+              <p>Por padrao em <code>~/.nodevalt-global-shell</code>, com packages, projetos e logs.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>NodeValt por Victor Azevedo</span>
+      <a href="https://github.com/victorazesc/nodevalt">github.com/victorazesc/nodevalt</a>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
