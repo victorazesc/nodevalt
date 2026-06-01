@@ -29,7 +29,7 @@ npm run dev -- daemon start
 Instalacao global via GitHub:
 
 ```bash
-npm install -g github:victorazesc/nodevalt
+npm install -g https://github.com/victorazesc/nodevalt/archive/refs/heads/main.tar.gz
 nodevalt init
 nodevalt daemon install
 nodevalt daemon status
