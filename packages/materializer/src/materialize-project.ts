@@ -1,5 +1,5 @@
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "../../database/src/db";
 import { getStorePaths, resolveUserPath } from "../../core/src/paths";
 import { updateProjectMaterialization } from "../../database/src/projects";
 import { parseNpmPackageLockFile } from "../../lockfile-parser/src/npm-parser";
@@ -28,7 +28,7 @@ export interface ActivatedMaterializeProjectResult extends MaterializeProjectRes
 }
 
 export async function materializeNpmProject(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   storePath: string;
   projectPath: string;
 }): Promise<ActivatedMaterializeProjectResult> {
@@ -51,7 +51,7 @@ export async function materializeNpmProject(options: {
 }
 
 export async function materializeNpmProjectVirtual(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   storePath: string;
   projectPath: string;
 }): Promise<MaterializeProjectResult> {

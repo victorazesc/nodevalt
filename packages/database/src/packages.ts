@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "./db";
 
 export interface PackageInput {
   id: string;
@@ -20,49 +20,47 @@ export interface PackageRow {
   updated_at: string;
 }
 
-export function upsertPackage(db: Database.Database, input: PackageInput): void {
+export function upsertPackage(db: NodeValtDatabase, input: PackageInput): void {
   const now = new Date().toISOString();
+  const existing = db.data.packages.find((row) => row.id === input.id);
 
-  db.prepare(`
-    INSERT INTO packages (
-      id,
-      name,
-      version,
-      integrity,
-      resolved,
-      store_path,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      @id,
-      @name,
-      @version,
-      @integrity,
-      @resolved,
-      @storePath,
-      @now,
-      @now
-    )
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      version = excluded.version,
-      integrity = excluded.integrity,
-      resolved = excluded.resolved,
-      store_path = excluded.store_path,
-      updated_at = excluded.updated_at
-  `).run({ ...input, now });
+  if (existing) {
+    Object.assign(existing, {
+      name: input.name,
+      version: input.version,
+      integrity: input.integrity,
+      resolved: input.resolved,
+      store_path: input.storePath,
+      updated_at: now,
+    });
+  } else {
+    db.data.packages.push({
+      id: input.id,
+      name: input.name,
+      version: input.version,
+      integrity: input.integrity,
+      resolved: input.resolved,
+      store_path: input.storePath,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  db.save();
 }
 
-export function getPackageCount(db: Database.Database): number {
-  const row = db.prepare("SELECT COUNT(*) AS count FROM packages").get() as { count: number };
-  return row.count;
+export function getPackageCount(db: NodeValtDatabase): number {
+  return db.data.packages.length;
 }
 
-export function listPackages(db: Database.Database): PackageRow[] {
-  return db.prepare("SELECT * FROM packages ORDER BY name, version").all() as PackageRow[];
+export function listPackages(db: NodeValtDatabase): PackageRow[] {
+  return [...db.data.packages].sort((a, b) => {
+    const nameOrder = a.name.localeCompare(b.name);
+    return nameOrder === 0 ? a.version.localeCompare(b.version) : nameOrder;
+  });
 }
 
-export function deletePackage(db: Database.Database, id: string): void {
-  db.prepare("DELETE FROM packages WHERE id = ?").run(id);
+export function deletePackage(db: NodeValtDatabase, id: string): void {
+  db.data.packages = db.data.packages.filter((pkg) => pkg.id !== id);
+  db.save();
 }

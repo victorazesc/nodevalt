@@ -50,7 +50,7 @@ export function getStorePaths(storePath: string) {
     logs: path.join(storePath, "logs"),
     tmp: path.join(storePath, "tmp"),
     configFile: path.join(storePath, "metadata", "config.json"),
-    databaseFile: path.join(storePath, "metadata", "nodevalt.sqlite"),
+    databaseFile: path.join(storePath, "metadata", "nodevalt.json"),
   };
 }
 

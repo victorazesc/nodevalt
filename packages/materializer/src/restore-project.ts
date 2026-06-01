@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "fs-extra";
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "../../database/src/db";
 import { resolveUserPath } from "../../core/src/paths";
 import { updateProjectStatus } from "../../database/src/projects";
 import { isNodeValtManagedNodeModules } from "./activate-node-modules";
@@ -12,7 +12,7 @@ export interface RestoreProjectResult {
 }
 
 export async function restoreProjectNodeModules(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   projectPath: string;
 }): Promise<RestoreProjectResult> {
   const projectPath = resolveUserPath(options.projectPath);

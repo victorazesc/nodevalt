@@ -3,10 +3,11 @@
 // apps/cli/src/index.ts
 import { execFile as execFile2 } from "child_process";
 import os2 from "os";
-import path21 from "path";
+import path22 from "path";
+import { fileURLToPath } from "url";
 import { promisify as promisify2 } from "util";
 import { cac } from "cac";
-import fs19 from "fs-extra";
+import fs20 from "fs-extra";
 
 // packages/core/src/config.ts
 import fs2 from "fs-extra";
@@ -56,7 +57,7 @@ function getStorePaths(storePath) {
     logs: path.join(storePath, "logs"),
     tmp: path.join(storePath, "tmp"),
     configFile: path.join(storePath, "metadata", "config.json"),
-    databaseFile: path.join(storePath, "metadata", "nodevalt.sqlite")
+    databaseFile: path.join(storePath, "metadata", "nodevalt.json")
   };
 }
 async function ensureStoreLayout(storePath) {
@@ -177,215 +178,172 @@ async function addWatchPath(config, watchPathInput) {
 }
 
 // packages/database/src/db.ts
-import Database from "better-sqlite3";
-
-// packages/database/src/migrations.ts
-function runMigrations(db) {
-  db.pragma("journal_mode = WAL");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
-      path TEXT NOT NULL UNIQUE,
-      name TEXT,
-      package_manager TEXT,
-      lockfile_path TEXT,
-      lockfile_hash TEXT,
-      node_modules_path TEXT,
-      node_modules_size_bytes INTEGER DEFAULT 0,
-      virtual_node_modules_path TEXT,
-      status TEXT,
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS packages (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      version TEXT NOT NULL,
-      integrity TEXT,
-      resolved TEXT,
-      store_path TEXT NOT NULL,
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS events (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      type TEXT NOT NULL,
-      payload TEXT,
-      status TEXT,
-      created_at TEXT,
-      processed_at TEXT
-    );
-  `);
-}
-
-// packages/database/src/db.ts
+import path2 from "path";
+import fs3 from "fs-extra";
+var NodeValtDatabase = class {
+  constructor(filePath, data) {
+    this.filePath = filePath;
+    this.data = data;
+  }
+  filePath;
+  data;
+  save() {
+    fs3.ensureDirSync(path2.dirname(this.filePath));
+    fs3.writeJsonSync(this.filePath, this.data, { spaces: 2 });
+  }
+  close() {
+    this.save();
+  }
+};
 function openNodeValtDatabase(storePath) {
-  const db = new Database(getStorePaths(storePath).databaseFile);
-  runMigrations(db);
-  return db;
+  const databaseFile = getStorePaths(storePath).databaseFile;
+  fs3.ensureDirSync(path2.dirname(databaseFile));
+  const data = fs3.pathExistsSync(databaseFile) ? normalizeDatabaseData(fs3.readJsonSync(databaseFile)) : createEmptyDatabaseData();
+  return new NodeValtDatabase(databaseFile, data);
+}
+function createEmptyDatabaseData() {
+  return {
+    projects: [],
+    packages: [],
+    events: []
+  };
+}
+function normalizeDatabaseData(value) {
+  if (!value || typeof value !== "object") {
+    return createEmptyDatabaseData();
+  }
+  const data = value;
+  return {
+    projects: Array.isArray(data.projects) ? data.projects : [],
+    packages: Array.isArray(data.packages) ? data.packages : [],
+    events: Array.isArray(data.events) ? data.events : []
+  };
 }
 
 // packages/database/src/packages.ts
 function upsertPackage(db, input) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  db.prepare(`
-    INSERT INTO packages (
-      id,
-      name,
-      version,
-      integrity,
-      resolved,
-      store_path,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      @id,
-      @name,
-      @version,
-      @integrity,
-      @resolved,
-      @storePath,
-      @now,
-      @now
-    )
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      version = excluded.version,
-      integrity = excluded.integrity,
-      resolved = excluded.resolved,
-      store_path = excluded.store_path,
-      updated_at = excluded.updated_at
-  `).run({ ...input, now });
+  const existing = db.data.packages.find((row) => row.id === input.id);
+  if (existing) {
+    Object.assign(existing, {
+      name: input.name,
+      version: input.version,
+      integrity: input.integrity,
+      resolved: input.resolved,
+      store_path: input.storePath,
+      updated_at: now
+    });
+  } else {
+    db.data.packages.push({
+      id: input.id,
+      name: input.name,
+      version: input.version,
+      integrity: input.integrity,
+      resolved: input.resolved,
+      store_path: input.storePath,
+      created_at: now,
+      updated_at: now
+    });
+  }
+  db.save();
 }
 function getPackageCount(db) {
-  const row = db.prepare("SELECT COUNT(*) AS count FROM packages").get();
-  return row.count;
+  return db.data.packages.length;
 }
 function listPackages(db) {
-  return db.prepare("SELECT * FROM packages ORDER BY name, version").all();
+  return [...db.data.packages].sort((a, b) => {
+    const nameOrder = a.name.localeCompare(b.name);
+    return nameOrder === 0 ? a.version.localeCompare(b.version) : nameOrder;
+  });
 }
 function deletePackage(db, id) {
-  db.prepare("DELETE FROM packages WHERE id = ?").run(id);
+  db.data.packages = db.data.packages.filter((pkg) => pkg.id !== id);
+  db.save();
 }
 
 // packages/database/src/projects.ts
 function upsertProject(db, project) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  db.prepare(`
-    INSERT INTO projects (
-      id,
-      path,
-      name,
-      package_manager,
-      lockfile_path,
-      lockfile_hash,
-      node_modules_path,
-      node_modules_size_bytes,
-      virtual_node_modules_path,
-      status,
-      created_at,
-      updated_at
-    )
-    VALUES (
-      @id,
-      @path,
-      @name,
-      @packageManager,
-      @lockfilePath,
-      @lockfileHash,
-      @nodeModulesPath,
-      @nodeModulesSizeBytes,
-      NULL,
-      @status,
-      @now,
-      @now
-    )
-    ON CONFLICT(path) DO UPDATE SET
-      name = excluded.name,
-      package_manager = excluded.package_manager,
-      lockfile_path = excluded.lockfile_path,
-      lockfile_hash = excluded.lockfile_hash,
-      node_modules_path = excluded.node_modules_path,
-      node_modules_size_bytes = excluded.node_modules_size_bytes,
-      status = excluded.status,
-      updated_at = excluded.updated_at
-  `).run({ ...project, now });
+  const existing = db.data.projects.find((row) => row.path === project.path);
+  if (existing) {
+    Object.assign(existing, {
+      name: project.name,
+      package_manager: project.packageManager,
+      lockfile_path: project.lockfilePath,
+      lockfile_hash: project.lockfileHash,
+      node_modules_path: project.nodeModulesPath,
+      node_modules_size_bytes: project.nodeModulesSizeBytes,
+      status: project.status,
+      updated_at: now
+    });
+  } else {
+    db.data.projects.push({
+      id: project.id,
+      path: project.path,
+      name: project.name,
+      package_manager: project.packageManager,
+      lockfile_path: project.lockfilePath,
+      lockfile_hash: project.lockfileHash,
+      node_modules_path: project.nodeModulesPath,
+      node_modules_size_bytes: project.nodeModulesSizeBytes,
+      virtual_node_modules_path: null,
+      status: project.status,
+      created_at: now,
+      updated_at: now
+    });
+  }
+  db.save();
 }
 function listProjects(db) {
-  return db.prepare("SELECT * FROM projects ORDER BY path").all();
+  return [...db.data.projects].sort((a, b) => a.path.localeCompare(b.path));
 }
 function getProjectStats(db) {
-  const row = db.prepare(
-    "SELECT COUNT(*) AS count, COALESCE(SUM(node_modules_size_bytes), 0) AS totalNodeModulesSizeBytes FROM projects"
-  ).get();
-  return row;
+  return {
+    count: db.data.projects.length,
+    totalNodeModulesSizeBytes: db.data.projects.reduce((total, project) => {
+      return total + project.node_modules_size_bytes;
+    }, 0)
+  };
 }
 function updateProjectMaterialization(db, input) {
-  db.prepare(`
-    UPDATE projects
-    SET
-      virtual_node_modules_path = @virtualNodeModulesPath,
-      status = @status,
-      updated_at = @now
-    WHERE path = @path
-  `).run({
-    ...input,
-    now: (/* @__PURE__ */ new Date()).toISOString()
-  });
+  const project = db.data.projects.find((row) => row.path === input.path);
+  if (!project) {
+    return;
+  }
+  project.virtual_node_modules_path = input.virtualNodeModulesPath;
+  project.status = input.status;
+  project.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+  db.save();
 }
 function updateProjectStatus(db, input) {
-  db.prepare(`
-    UPDATE projects
-    SET
-      status = @status,
-      updated_at = @now
-    WHERE path = @path
-  `).run({
-    ...input,
-    now: (/* @__PURE__ */ new Date()).toISOString()
-  });
+  const project = db.data.projects.find((row) => row.path === input.path);
+  if (!project) {
+    return;
+  }
+  project.status = input.status;
+  project.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+  db.save();
 }
 
 // packages/daemon/src/watcher.ts
-import path2 from "path";
+import path3 from "path";
 import chokidar from "chokidar";
-import fs3 from "fs-extra";
+import fs4 from "fs-extra";
 
 // packages/database/src/events.ts
 function insertEvent(db, input) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const id = hashString(`${input.type}\0${JSON.stringify(input.payload)}\0${now}`);
-  db.prepare(`
-    INSERT INTO events (
-      id,
-      project_id,
-      type,
-      payload,
-      status,
-      created_at,
-      processed_at
-    )
-    VALUES (
-      @id,
-      @projectId,
-      @type,
-      @payload,
-      @status,
-      @now,
-      NULL
-    )
-  `).run({
+  db.data.events.push({
     id,
-    projectId: input.projectId,
+    project_id: input.projectId,
     type: input.type,
     payload: JSON.stringify(input.payload),
     status: input.status,
-    now
+    created_at: now,
+    processed_at: null
   });
+  db.save();
   return id;
 }
 
@@ -469,40 +427,40 @@ function getDaemonWatchFiles(projectPaths) {
   const watchFiles = /* @__PURE__ */ new Set();
   for (const projectPath of projectPaths) {
     for (const fileName of RELEVANT_FILES) {
-      watchFiles.add(path2.join(projectPath, fileName));
+      watchFiles.add(path3.join(projectPath, fileName));
     }
   }
   return [...watchFiles];
 }
 function isRelevantDaemonFile(filePath) {
-  return RELEVANT_FILES.has(path2.basename(filePath));
+  return RELEVANT_FILES.has(path3.basename(filePath));
 }
 async function getProjectPathForEvent(filePath) {
-  const basename = path2.basename(filePath);
+  const basename = path3.basename(filePath);
   if (basename === "package.json") {
-    return path2.dirname(filePath);
+    return path3.dirname(filePath);
   }
-  let currentPath = path2.dirname(filePath);
-  while (currentPath !== path2.dirname(currentPath)) {
-    if (await fs3.pathExists(path2.join(currentPath, "package.json"))) {
+  let currentPath = path3.dirname(filePath);
+  while (currentPath !== path3.dirname(currentPath)) {
+    if (await fs4.pathExists(path3.join(currentPath, "package.json"))) {
       return currentPath;
     }
-    currentPath = path2.dirname(currentPath);
+    currentPath = path3.dirname(currentPath);
   }
   return null;
 }
 function isIgnoredPath(filePath, ignoredDirs) {
-  return filePath.split(path2.sep).some((segment) => ignoredDirs.has(segment));
+  return filePath.split(path3.sep).some((segment) => ignoredDirs.has(segment));
 }
 
 // packages/doctor/src/doctor-project.ts
-import path6 from "path";
-import fs7 from "fs-extra";
+import path7 from "path";
+import fs8 from "fs-extra";
 
 // packages/lockfile-parser/src/npm-parser.ts
-import fs4 from "fs-extra";
+import fs5 from "fs-extra";
 async function parseNpmPackageLockFile(lockfilePath) {
-  const rawLockfile = await fs4.readJson(lockfilePath);
+  const rawLockfile = await fs5.readJson(lockfilePath);
   return parseNpmPackageLock(rawLockfile);
 }
 function parseNpmPackageLock(rawLockfile) {
@@ -615,34 +573,34 @@ function isRecord(value) {
 }
 
 // packages/materializer/src/activate-node-modules.ts
-import path4 from "path";
-import fs6 from "fs-extra";
+import path5 from "path";
+import fs7 from "fs-extra";
 
 // packages/materializer/src/link-package-tree.ts
-import path3 from "path";
-import fs5 from "fs-extra";
+import path4 from "path";
+import fs6 from "fs-extra";
 async function linkPackageTree(sourcePath, destinationPath) {
-  const stat = await fs5.lstat(sourcePath);
+  const stat = await fs6.lstat(sourcePath);
   if (stat.isSymbolicLink()) {
-    const targetPath = await fs5.readlink(sourcePath);
-    await fs5.ensureDir(path3.dirname(destinationPath));
-    await fs5.symlink(targetPath, destinationPath);
+    const targetPath = await fs6.readlink(sourcePath);
+    await fs6.ensureDir(path4.dirname(destinationPath));
+    await fs6.symlink(targetPath, destinationPath);
     return;
   }
   if (stat.isDirectory()) {
-    await fs5.ensureDir(destinationPath);
-    const entries = await fs5.readdir(sourcePath);
+    await fs6.ensureDir(destinationPath);
+    const entries = await fs6.readdir(sourcePath);
     await Promise.all(
-      entries.map((entry) => linkPackageTree(path3.join(sourcePath, entry), path3.join(destinationPath, entry)))
+      entries.map((entry) => linkPackageTree(path4.join(sourcePath, entry), path4.join(destinationPath, entry)))
     );
     return;
   }
-  await fs5.ensureDir(path3.dirname(destinationPath));
+  await fs6.ensureDir(path4.dirname(destinationPath));
   try {
-    await fs5.link(sourcePath, destinationPath);
+    await fs6.link(sourcePath, destinationPath);
   } catch (error) {
     if (isCrossDeviceLinkError(error)) {
-      await fs5.copyFile(sourcePath, destinationPath);
+      await fs6.copyFile(sourcePath, destinationPath);
       return;
     }
     throw error;
@@ -655,7 +613,7 @@ function isCrossDeviceLinkError(error) {
 // packages/materializer/src/activate-node-modules.ts
 var NODEVALT_MARKER_FILE = ".nodevalt.json";
 async function activateVirtualNodeModules(options) {
-  const localNodeModulesPath = path4.join(options.projectPath, "node_modules");
+  const localNodeModulesPath = path5.join(options.projectPath, "node_modules");
   const backupPath = await backupExistingNodeModules(localNodeModulesPath);
   await linkPackageTree(options.virtualNodeModulesPath, localNodeModulesPath);
   await writeNodeValtMarker(localNodeModulesPath, options.virtualNodeModulesPath);
@@ -665,23 +623,23 @@ async function activateVirtualNodeModules(options) {
   };
 }
 async function backupExistingNodeModules(localNodeModulesPath) {
-  if (!await fs6.pathExists(localNodeModulesPath)) {
+  if (!await fs7.pathExists(localNodeModulesPath)) {
     return null;
   }
-  const stat = await fs6.lstat(localNodeModulesPath);
+  const stat = await fs7.lstat(localNodeModulesPath);
   if (stat.isSymbolicLink()) {
-    await fs6.remove(localNodeModulesPath);
+    await fs7.remove(localNodeModulesPath);
     return null;
   }
   if (!stat.isDirectory()) {
     throw new Error("Cannot replace node_modules because it is not a directory or symlink");
   }
   if (await isNodeValtManagedNodeModules(localNodeModulesPath)) {
-    await fs6.remove(localNodeModulesPath);
+    await fs7.remove(localNodeModulesPath);
     return null;
   }
   const backupPath = `${localNodeModulesPath}.nodevalt-backup-${formatBackupTimestamp(/* @__PURE__ */ new Date())}`;
-  await fs6.move(localNodeModulesPath, backupPath, {
+  await fs7.move(localNodeModulesPath, backupPath, {
     overwrite: false
   });
   return backupPath;
@@ -690,11 +648,11 @@ function formatBackupTimestamp(date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
 }
 async function isNodeValtManagedNodeModules(nodeModulesPath) {
-  return fs6.pathExists(path4.join(nodeModulesPath, NODEVALT_MARKER_FILE));
+  return fs7.pathExists(path5.join(nodeModulesPath, NODEVALT_MARKER_FILE));
 }
 async function writeNodeValtMarker(nodeModulesPath, virtualNodeModulesPath) {
-  await fs6.writeJson(
-    path4.join(nodeModulesPath, NODEVALT_MARKER_FILE),
+  await fs7.writeJson(
+    path5.join(nodeModulesPath, NODEVALT_MARKER_FILE),
     {
       managedBy: "nodevalt",
       strategy: "hardlink-tree",
@@ -708,13 +666,13 @@ async function writeNodeValtMarker(nodeModulesPath, virtualNodeModulesPath) {
 }
 
 // packages/store/src/package-paths.ts
-import path5 from "path";
+import path6 from "path";
 function getPackageContentId(ref) {
   return hashString([ref.name, ref.version, ref.integrity ?? "", ref.resolved ?? ""].join("\0"));
 }
 function getPackageStorePath(storePath, ref) {
   const contentId = getPackageContentId(ref);
-  return path5.join(
+  return path6.join(
     getStorePaths(storePath).packages,
     encodePackageName(ref.name),
     "versions",
@@ -735,10 +693,10 @@ var LOCKFILES = ["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock",
 async function doctorNpmProject(options) {
   const projectPath = resolveUserPath(options.projectPath);
   const issues = [];
-  const lockfilePath = path6.join(projectPath, "package-lock.json");
-  const nodeModulesPath = path6.join(projectPath, "node_modules");
+  const lockfilePath = path7.join(projectPath, "package-lock.json");
+  const nodeModulesPath = path7.join(projectPath, "node_modules");
   await checkLockfiles(projectPath, issues);
-  if (!await fs7.pathExists(lockfilePath)) {
+  if (!await fs8.pathExists(lockfilePath)) {
     issues.push({
       severity: "error",
       code: "missing-package-lock",
@@ -762,7 +720,7 @@ async function doctorNpmProject(options) {
 }
 async function checkLockfiles(projectPath, issues) {
   const presentLockfiles = (await Promise.all(
-    LOCKFILES.map(async (file) => await fs7.pathExists(path6.join(projectPath, file)) ? file : null)
+    LOCKFILES.map(async (file) => await fs8.pathExists(path7.join(projectPath, file)) ? file : null)
   )).filter((file) => file !== null);
   if (presentLockfiles.length > 1) {
     issues.push({
@@ -773,7 +731,7 @@ async function checkLockfiles(projectPath, issues) {
   }
 }
 async function checkNodeModules(nodeModulesPath, issues) {
-  if (!await fs7.pathExists(nodeModulesPath)) {
+  if (!await fs8.pathExists(nodeModulesPath)) {
     issues.push({
       severity: "warning",
       code: "missing-node-modules",
@@ -781,7 +739,7 @@ async function checkNodeModules(nodeModulesPath, issues) {
     });
     return;
   }
-  const stat = await fs7.lstat(nodeModulesPath);
+  const stat = await fs8.lstat(nodeModulesPath);
   if (!stat.isSymbolicLink()) {
     if (!(stat.isDirectory() && await isNodeValtManagedNodeModules(nodeModulesPath))) {
       issues.push({
@@ -796,7 +754,7 @@ async function checkNodeModules(nodeModulesPath, issues) {
   }
   let realNodeModulesPath;
   try {
-    realNodeModulesPath = await fs7.realpath(nodeModulesPath);
+    realNodeModulesPath = await fs8.realpath(nodeModulesPath);
   } catch {
     issues.push({
       severity: "error",
@@ -813,7 +771,7 @@ async function checkStorePackages(storePath, packages, issues) {
       continue;
     }
     const packageStorePath = getPackageStorePath(storePath, pkg);
-    if (!await fs7.pathExists(packageStorePath)) {
+    if (!await fs8.pathExists(packageStorePath)) {
       issues.push({
         severity: "error",
         code: "missing-store-package",
@@ -825,8 +783,8 @@ async function checkStorePackages(storePath, packages, issues) {
 async function checkBinLinks(nodeModulesPath, packages, issues) {
   const expectedBins = packages.filter((pkg) => isTopLevelPackagePath(pkg.packagePath)).flatMap((pkg) => Object.keys(pkg.bin));
   for (const binName of expectedBins) {
-    const binPath = path6.join(nodeModulesPath, ".bin", binName);
-    if (!await fs7.pathExists(binPath)) {
+    const binPath = path7.join(nodeModulesPath, ".bin", binName);
+    if (!await fs8.pathExists(binPath)) {
       issues.push({
         severity: "warning",
         code: "missing-bin-link",
@@ -836,11 +794,11 @@ async function checkBinLinks(nodeModulesPath, packages, issues) {
   }
 }
 async function collectBrokenSymlinks(currentPath, issues) {
-  const stat = await fs7.lstat(currentPath);
+  const stat = await fs8.lstat(currentPath);
   if (stat.isSymbolicLink()) {
-    const targetPath = await fs7.readlink(currentPath);
-    const absoluteTargetPath = path6.isAbsolute(targetPath) ? targetPath : path6.resolve(path6.dirname(currentPath), targetPath);
-    if (!await fs7.pathExists(absoluteTargetPath)) {
+    const targetPath = await fs8.readlink(currentPath);
+    const absoluteTargetPath = path7.isAbsolute(targetPath) ? targetPath : path7.resolve(path7.dirname(currentPath), targetPath);
+    if (!await fs8.pathExists(absoluteTargetPath)) {
       issues.push({
         severity: "error",
         code: "broken-symlink",
@@ -852,9 +810,9 @@ async function collectBrokenSymlinks(currentPath, issues) {
   if (!stat.isDirectory()) {
     return;
   }
-  const entries = await fs7.readdir(currentPath);
+  const entries = await fs8.readdir(currentPath);
   for (const entry of entries) {
-    await collectBrokenSymlinks(path6.join(currentPath, entry), issues);
+    await collectBrokenSymlinks(path7.join(currentPath, entry), issues);
   }
 }
 function isTopLevelPackagePath(packagePath) {
@@ -872,16 +830,16 @@ function buildResult(projectPath, issues) {
 }
 
 // packages/gc/src/garbage-collector.ts
-import path9 from "path";
-import fs10 from "fs-extra";
+import path10 from "path";
+import fs11 from "fs-extra";
 
 // packages/materializer/src/nodevalt-manifest.ts
-import path7 from "path";
-import fs8 from "fs-extra";
+import path8 from "path";
+import fs9 from "fs-extra";
 var NODEVALT_LINKS_MANIFEST = ".nodevalt-links.json";
 async function writeNodeValtLinksManifest(nodeModulesPath, storePaths) {
-  await fs8.writeJson(
-    path7.join(nodeModulesPath, NODEVALT_LINKS_MANIFEST),
+  await fs9.writeJson(
+    path8.join(nodeModulesPath, NODEVALT_LINKS_MANIFEST),
     {
       managedBy: "nodevalt",
       storePaths: [...new Set(storePaths)].sort()
@@ -893,7 +851,7 @@ async function writeNodeValtLinksManifest(nodeModulesPath, storePaths) {
 }
 async function readNodeValtLinksManifest(nodeModulesPath) {
   try {
-    const value = await fs8.readJson(path7.join(nodeModulesPath, NODEVALT_LINKS_MANIFEST));
+    const value = await fs9.readJson(path8.join(nodeModulesPath, NODEVALT_LINKS_MANIFEST));
     if (value.managedBy !== "nodevalt" || !Array.isArray(value.storePaths)) {
       return null;
     }
@@ -907,20 +865,20 @@ async function readNodeValtLinksManifest(nodeModulesPath) {
 }
 
 // packages/scanner/src/size.ts
-import path8 from "path";
-import fs9 from "fs-extra";
+import path9 from "path";
+import fs10 from "fs-extra";
 async function getDirectorySizeBytes(targetPath) {
   try {
-    const stat = await fs9.lstat(targetPath);
+    const stat = await fs10.lstat(targetPath);
     if (stat.isSymbolicLink()) {
       return stat.size;
     }
     if (!stat.isDirectory()) {
       return stat.size;
     }
-    const entries = await fs9.readdir(targetPath, { withFileTypes: true });
+    const entries = await fs10.readdir(targetPath, { withFileTypes: true });
     const sizes = await Promise.all(
-      entries.map((entry) => getDirectorySizeBytes(path8.join(targetPath, entry.name)))
+      entries.map((entry) => getDirectorySizeBytes(path9.join(targetPath, entry.name)))
     );
     return sizes.reduce((total, size) => total + size, 0);
   } catch {
@@ -939,9 +897,9 @@ async function collectGarbage(options) {
     if (referencedStorePaths.has(normalizedStorePath)) {
       continue;
     }
-    const packageRootPath = path9.dirname(normalizedStorePath);
+    const packageRootPath = path10.dirname(normalizedStorePath);
     diskFreedBytes += await getDirectorySizeBytes(packageRootPath);
-    await fs10.remove(packageRootPath);
+    await fs11.remove(packageRootPath);
     deletePackage(options.db, pkg.id);
     packagesRemoved += 1;
   }
@@ -953,7 +911,7 @@ async function collectGarbage(options) {
 async function collectReferencedStorePaths(storePath) {
   const referencedStorePaths = /* @__PURE__ */ new Set();
   const projectsPath = getStorePaths(storePath).projects;
-  if (!await fs10.pathExists(projectsPath)) {
+  if (!await fs11.pathExists(projectsPath)) {
     return referencedStorePaths;
   }
   await walkReferences(projectsPath, referencedStorePaths);
@@ -961,21 +919,21 @@ async function collectReferencedStorePaths(storePath) {
 }
 async function normalizeExistingPath(inputPath) {
   try {
-    return await fs10.realpath(inputPath);
+    return await fs11.realpath(inputPath);
   } catch {
-    return path9.resolve(inputPath);
+    return path10.resolve(inputPath);
   }
 }
 async function walkReferences(currentPath, referencedStorePaths) {
   let stat;
   try {
-    stat = await fs10.lstat(currentPath);
+    stat = await fs11.lstat(currentPath);
   } catch {
     return;
   }
   if (stat.isSymbolicLink()) {
     try {
-      referencedStorePaths.add(await fs10.realpath(currentPath));
+      referencedStorePaths.add(await fs11.realpath(currentPath));
     } catch {
       return;
     }
@@ -990,23 +948,23 @@ async function walkReferences(currentPath, referencedStorePaths) {
       referencedStorePaths.add(await normalizeExistingPath(storePath));
     }
   }
-  const entries = await fs10.readdir(currentPath);
-  await Promise.all(entries.map((entry) => walkReferences(path9.join(currentPath, entry), referencedStorePaths)));
+  const entries = await fs11.readdir(currentPath);
+  await Promise.all(entries.map((entry) => walkReferences(path10.join(currentPath, entry), referencedStorePaths)));
 }
 
 // packages/materializer/src/materialize-project.ts
-import path15 from "path";
+import path16 from "path";
 
 // packages/store/src/global-store.ts
-import path11 from "path";
+import path12 from "path";
 import { promises as nodeFs } from "fs";
-import fs12 from "fs-extra";
+import fs13 from "fs-extra";
 
 // packages/store/src/package-fetcher.ts
 import { execFile } from "child_process";
 import { promisify } from "util";
-import path10 from "path";
-import fs11 from "fs-extra";
+import path11 from "path";
+import fs12 from "fs-extra";
 
 // packages/store/src/integrity.ts
 import crypto2 from "crypto";
@@ -1052,36 +1010,36 @@ function safeEqualBase64(actual, expected) {
 var execFileAsync = promisify(execFile);
 async function fetchPackageToStore(options) {
   const storePaths = getStorePaths(options.storePath);
-  const tmpRoot = await fs11.mkdtemp(path10.join(storePaths.tmp, "pkg-"));
-  const tarballPath = path10.join(tmpRoot, "package.tgz");
-  const extractPath = path10.join(tmpRoot, "extract");
+  const tmpRoot = await fs12.mkdtemp(path11.join(storePaths.tmp, "pkg-"));
+  const tarballPath = path11.join(tmpRoot, "package.tgz");
+  const extractPath = path11.join(tmpRoot, "extract");
   try {
     const tarball = await downloadTarball(options.resolved);
     verifyIntegrity(tarball, options.integrity);
-    await fs11.writeFile(tarballPath, tarball);
-    await fs11.ensureDir(extractPath);
+    await fs12.writeFile(tarballPath, tarball);
+    await fs12.ensureDir(extractPath);
     await execFileAsync("tar", ["-xzf", tarballPath, "-C", extractPath]);
     const extractedPackagePath = await getExtractedPackagePath(extractPath);
-    await fs11.ensureDir(path10.dirname(options.destinationPath));
-    await fs11.move(extractedPackagePath, options.destinationPath, {
+    await fs12.ensureDir(path11.dirname(options.destinationPath));
+    await fs12.move(extractedPackagePath, options.destinationPath, {
       overwrite: false
     });
   } finally {
-    await fs11.remove(tmpRoot);
+    await fs12.remove(tmpRoot);
   }
 }
 async function getExtractedPackagePath(extractPath) {
-  const npmPackagePath = path10.join(extractPath, "package");
-  if (await fs11.pathExists(npmPackagePath)) {
+  const npmPackagePath = path11.join(extractPath, "package");
+  if (await fs12.pathExists(npmPackagePath)) {
     return npmPackagePath;
   }
-  if (await fs11.pathExists(path10.join(extractPath, "package.json"))) {
+  if (await fs12.pathExists(path11.join(extractPath, "package.json"))) {
     return extractPath;
   }
-  const entries = await fs11.readdir(extractPath, { withFileTypes: true });
+  const entries = await fs12.readdir(extractPath, { withFileTypes: true });
   const directories = entries.filter((entry) => entry.isDirectory());
   if (directories.length === 1) {
-    return path10.join(extractPath, directories[0].name);
+    return path11.join(extractPath, directories[0].name);
   }
   throw new Error("Invalid package tarball: missing package directory");
 }
@@ -1111,10 +1069,10 @@ async function ensureNpmPackageInStore(options) {
   }
   const resolved = ref.resolved;
   const integrity = ref.integrity;
-  const existed = await fs12.pathExists(destinationPath);
+  const existed = await fs13.pathExists(destinationPath);
   if (!existed) {
     await withFileLock(`${destinationPath}.lock`, async () => {
-      if (await fs12.pathExists(destinationPath)) {
+      if (await fs13.pathExists(destinationPath)) {
         return;
       }
       await fetchPackageToStore({
@@ -1150,13 +1108,13 @@ function toStorePackageRef(pkg) {
   };
 }
 async function withFileLock(lockPath, action) {
-  await fs12.ensureDir(path11.dirname(lockPath));
+  await fs13.ensureDir(path12.dirname(lockPath));
   const lockHandle = await acquireFileLock(lockPath);
   try {
     return await action();
   } finally {
     await lockHandle.close();
-    await fs12.remove(lockPath);
+    await fs13.remove(lockPath);
   }
 }
 async function acquireFileLock(lockPath) {
@@ -1176,11 +1134,11 @@ async function acquireFileLock(lockPath) {
 }
 async function removeStaleLock(lockPath) {
   try {
-    const stat = await fs12.stat(lockPath);
+    const stat = await fs13.stat(lockPath);
     if (Date.now() - stat.mtimeMs <= LOCK_STALE_MS) {
       return false;
     }
-    await fs12.remove(lockPath);
+    await fs13.remove(lockPath);
     return true;
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
@@ -1199,26 +1157,26 @@ function isNodeError(error) {
 }
 
 // packages/materializer/src/create-bin-links.ts
-import path12 from "path";
-import fs13 from "fs-extra";
+import path13 from "path";
+import fs14 from "fs-extra";
 async function createBinLinks(options) {
-  const binDir = path12.join(options.virtualNodeModulesPath, ".bin");
+  const binDir = path13.join(options.virtualNodeModulesPath, ".bin");
   const linkedBins = [];
   for (const pkg of options.packages) {
     if (!isTopLevelPackagePath2(pkg.packagePath)) {
       continue;
     }
     for (const [binName, binTarget] of Object.entries(pkg.bin)) {
-      if (!isSafeBinName(binName) || path12.isAbsolute(binTarget)) {
+      if (!isSafeBinName(binName) || path13.isAbsolute(binTarget)) {
         continue;
       }
-      await fs13.ensureDir(binDir);
+      await fs14.ensureDir(binDir);
       const packageRelativePath = pkg.packagePath.slice("node_modules/".length);
-      const absoluteTargetPath = path12.join(options.virtualNodeModulesPath, packageRelativePath, binTarget);
-      const linkPath = path12.join(binDir, binName);
-      const relativeTargetPath = path12.relative(binDir, absoluteTargetPath);
-      await fs13.remove(linkPath);
-      await fs13.symlink(relativeTargetPath, linkPath);
+      const absoluteTargetPath = path13.join(options.virtualNodeModulesPath, packageRelativePath, binTarget);
+      const linkPath = path13.join(binDir, binName);
+      const relativeTargetPath = path13.relative(binDir, absoluteTargetPath);
+      await fs14.remove(linkPath);
+      await fs14.symlink(relativeTargetPath, linkPath);
       linkedBins.push({
         name: binName,
         linkPath,
@@ -1239,11 +1197,11 @@ function isSafeBinName(binName) {
 }
 
 // packages/materializer/src/create-node-modules.ts
-import path13 from "path";
-import fs14 from "fs-extra";
+import path14 from "path";
+import fs15 from "fs-extra";
 async function createVirtualNodeModules(options) {
-  await fs14.remove(options.virtualNodeModulesPath);
-  await fs14.ensureDir(options.virtualNodeModulesPath);
+  await fs15.remove(options.virtualNodeModulesPath);
+  await fs15.ensureDir(options.virtualNodeModulesPath);
   const linkedPackages = [];
   for (const pkg of options.packages) {
     const storePackage = options.storePackages.get(pkg.packagePath);
@@ -1254,9 +1212,9 @@ async function createVirtualNodeModules(options) {
     if (!relativePackagePath) {
       continue;
     }
-    const linkPath = path13.join(options.virtualNodeModulesPath, relativePackagePath);
-    await fs14.ensureDir(path13.dirname(linkPath));
-    await fs14.remove(linkPath);
+    const linkPath = path14.join(options.virtualNodeModulesPath, relativePackagePath);
+    await fs15.ensureDir(path14.dirname(linkPath));
+    await fs15.remove(linkPath);
     await linkPackageTree(storePackage.storePath, linkPath);
     linkedPackages.push({
       name: pkg.name,
@@ -1280,10 +1238,10 @@ function getRelativePackagePath(packagePath) {
 }
 
 // packages/materializer/src/project-hash.ts
-import path14 from "path";
+import path15 from "path";
 async function getProjectMaterializationHash(projectPathInput) {
   const projectPath = resolveUserPath(projectPathInput);
-  const lockfilePath = path14.join(projectPath, "package-lock.json");
+  const lockfilePath = path15.join(projectPath, "package-lock.json");
   const lockfileHash = await hashFile(lockfilePath) ?? "missing-lockfile";
   return hashString(`${projectPath}\0${lockfileHash}`).slice(0, 24);
 }
@@ -1307,10 +1265,10 @@ async function materializeNpmProject(options) {
 }
 async function materializeNpmProjectVirtual(options) {
   const projectPath = resolveUserPath(options.projectPath);
-  const lockfilePath = path15.join(projectPath, "package-lock.json");
+  const lockfilePath = path16.join(projectPath, "package-lock.json");
   const lockfile = await parseNpmPackageLockFile(lockfilePath);
   const projectHash = await getProjectMaterializationHash(projectPath);
-  const virtualNodeModulesPath = path15.join(getStorePaths(options.storePath).projects, projectHash, "node_modules");
+  const virtualNodeModulesPath = path16.join(getStorePaths(options.storePath).projects, projectHash, "node_modules");
   const storePackages = /* @__PURE__ */ new Map();
   const result = {
     projectPath,
@@ -1353,14 +1311,14 @@ async function materializeNpmProjectVirtual(options) {
 }
 
 // packages/materializer/src/materialize-installed-node-modules.ts
-import path16 from "path";
-import fs15 from "fs-extra";
+import path17 from "path";
+import fs16 from "fs-extra";
 async function materializeInstalledNodeModules(options) {
   const projectPath = resolveUserPath(options.projectPath);
-  const localNodeModulesPath = path16.join(projectPath, "node_modules");
+  const localNodeModulesPath = path17.join(projectPath, "node_modules");
   const sourceNodeModulesPath = await getSourceNodeModulesPath(localNodeModulesPath);
   const projectHash = await getProjectMaterializationHash(projectPath);
-  const virtualNodeModulesPath = path16.join(getStorePaths(options.storePath).projects, projectHash, "node_modules");
+  const virtualNodeModulesPath = path17.join(getStorePaths(options.storePath).projects, projectHash, "node_modules");
   const tmpVirtualNodeModulesPath = `${virtualNodeModulesPath}.tmp-${process.pid}-${Date.now()}`;
   const packages = await listInstalledPackages(sourceNodeModulesPath);
   const result = {
@@ -1373,8 +1331,8 @@ async function materializeInstalledNodeModules(options) {
     packagesLinked: 0,
     packagesSkipped: 0
   };
-  await fs15.remove(tmpVirtualNodeModulesPath);
-  await fs15.ensureDir(tmpVirtualNodeModulesPath);
+  await fs16.remove(tmpVirtualNodeModulesPath);
+  await fs16.ensureDir(tmpVirtualNodeModulesPath);
   try {
     const referencedStorePaths = [];
     for (const pkg of packages) {
@@ -1388,8 +1346,8 @@ async function materializeInstalledNodeModules(options) {
         result.packagesSkipped += 1;
         continue;
       }
-      const linkPath = path16.join(tmpVirtualNodeModulesPath, pkg.relativePath);
-      await fs15.ensureDir(path16.dirname(linkPath));
+      const linkPath = path17.join(tmpVirtualNodeModulesPath, pkg.relativePath);
+      await fs16.ensureDir(path17.dirname(linkPath));
       await linkPackageTree(storePackage.path, linkPath);
       referencedStorePaths.push(storePackage.path);
       result[storePackage.reused ? "packagesReused" : "packagesCopied"] += 1;
@@ -1397,8 +1355,8 @@ async function materializeInstalledNodeModules(options) {
     }
     await writeNodeValtLinksManifest(tmpVirtualNodeModulesPath, referencedStorePaths);
     await copyBinDirectory(sourceNodeModulesPath, tmpVirtualNodeModulesPath);
-    await fs15.remove(virtualNodeModulesPath);
-    await fs15.move(tmpVirtualNodeModulesPath, virtualNodeModulesPath);
+    await fs16.remove(virtualNodeModulesPath);
+    await fs16.move(tmpVirtualNodeModulesPath, virtualNodeModulesPath);
     const activation = await activateVirtualNodeModules({
       projectPath,
       virtualNodeModulesPath
@@ -1413,36 +1371,36 @@ async function materializeInstalledNodeModules(options) {
       ...activation
     };
   } catch (error) {
-    await fs15.remove(tmpVirtualNodeModulesPath);
+    await fs16.remove(tmpVirtualNodeModulesPath);
     throw error;
   }
 }
 async function getSourceNodeModulesPath(localNodeModulesPath) {
-  const stat = await fs15.lstat(localNodeModulesPath);
+  const stat = await fs16.lstat(localNodeModulesPath);
   if (!stat.isDirectory() && !stat.isSymbolicLink()) {
     throw new Error("node_modules is not a directory or symlink");
   }
   if (stat.isSymbolicLink()) {
-    return fs15.realpath(localNodeModulesPath);
+    return fs16.realpath(localNodeModulesPath);
   }
   return localNodeModulesPath;
 }
 async function listInstalledPackages(nodeModulesPath) {
   const packages = [];
-  const entries = await fs15.readdir(nodeModulesPath, { withFileTypes: true });
+  const entries = await fs16.readdir(nodeModulesPath, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name === ".bin" || entry.name.startsWith(".")) {
       continue;
     }
-    const entryPath = path16.join(nodeModulesPath, entry.name);
+    const entryPath = path17.join(nodeModulesPath, entry.name);
     if (entry.name.startsWith("@") && entry.isDirectory()) {
-      const scopedEntries = await fs15.readdir(entryPath, { withFileTypes: true });
+      const scopedEntries = await fs16.readdir(entryPath, { withFileTypes: true });
       for (const scopedEntry of scopedEntries) {
         if (!scopedEntry.isDirectory() && !scopedEntry.isSymbolicLink()) {
           continue;
         }
-        const relativePath = path16.join(entry.name, scopedEntry.name);
-        const pkg2 = await readInstalledPackage(path16.join(entryPath, scopedEntry.name), relativePath, scopedEntry.isSymbolicLink());
+        const relativePath = path17.join(entry.name, scopedEntry.name);
+        const pkg2 = await readInstalledPackage(path17.join(entryPath, scopedEntry.name), relativePath, scopedEntry.isSymbolicLink());
         if (pkg2) {
           packages.push(pkg2);
         }
@@ -1461,7 +1419,7 @@ async function listInstalledPackages(nodeModulesPath) {
 }
 async function readInstalledPackage(packagePath, relativePath, isSymlink) {
   try {
-    const packageJson = await fs15.readJson(path16.join(packagePath, "package.json"));
+    const packageJson = await fs16.readJson(path17.join(packagePath, "package.json"));
     if (!packageJson.name || !packageJson.version) {
       return null;
     }
@@ -1477,7 +1435,7 @@ async function readInstalledPackage(packagePath, relativePath, isSymlink) {
   }
 }
 async function ensureInstalledPackageInStore(options) {
-  const sourcePath = options.pkg.isSymlink ? await fs15.realpath(options.pkg.packagePath) : options.pkg.packagePath;
+  const sourcePath = options.pkg.isSymlink ? await fs16.realpath(options.pkg.packagePath) : options.pkg.packagePath;
   const ref = {
     name: options.pkg.name,
     version: options.pkg.version,
@@ -1485,7 +1443,7 @@ async function ensureInstalledPackageInStore(options) {
     resolved: null
   };
   const destinationPath = getPackageStorePath(options.storePath, ref);
-  const existed = await fs15.pathExists(destinationPath);
+  const existed = await fs16.pathExists(destinationPath);
   if (!existed) {
     await copyPackageToStore(sourcePath, destinationPath);
   }
@@ -1504,44 +1462,44 @@ async function ensureInstalledPackageInStore(options) {
 }
 async function copyPackageToStore(sourcePath, destinationPath) {
   const tmpPath = `${destinationPath}.tmp-${process.pid}-${Date.now()}`;
-  await fs15.ensureDir(path16.dirname(destinationPath));
-  await fs15.remove(tmpPath);
-  await fs15.copy(sourcePath, tmpPath, {
+  await fs16.ensureDir(path17.dirname(destinationPath));
+  await fs16.remove(tmpPath);
+  await fs16.copy(sourcePath, tmpPath, {
     dereference: false
   });
-  await fs15.move(tmpPath, destinationPath, {
+  await fs16.move(tmpPath, destinationPath, {
     overwrite: false
   });
 }
 async function copyBinDirectory(sourceNodeModulesPath, virtualNodeModulesPath) {
-  const sourceBinPath = path16.join(sourceNodeModulesPath, ".bin");
-  if (!await fs15.pathExists(sourceBinPath)) {
+  const sourceBinPath = path17.join(sourceNodeModulesPath, ".bin");
+  if (!await fs16.pathExists(sourceBinPath)) {
     return;
   }
-  await fs15.copy(sourceBinPath, path16.join(virtualNodeModulesPath, ".bin"), {
+  await fs16.copy(sourceBinPath, path17.join(virtualNodeModulesPath, ".bin"), {
     dereference: false
   });
 }
 
 // packages/materializer/src/restore-project.ts
-import path17 from "path";
-import fs16 from "fs-extra";
+import path18 from "path";
+import fs17 from "fs-extra";
 async function restoreProjectNodeModules(options) {
   const projectPath = resolveUserPath(options.projectPath);
-  const nodeModulesPath = path17.join(projectPath, "node_modules");
+  const nodeModulesPath = path18.join(projectPath, "node_modules");
   const backupPath = await findLatestBackup(projectPath);
   if (!backupPath) {
     throw new Error("No node_modules backup found");
   }
-  if (await fs16.pathExists(nodeModulesPath)) {
-    const stat = await fs16.lstat(nodeModulesPath);
+  if (await fs17.pathExists(nodeModulesPath)) {
+    const stat = await fs17.lstat(nodeModulesPath);
     const canRemove = stat.isSymbolicLink() || stat.isDirectory() && await isNodeValtManagedNodeModules(nodeModulesPath);
     if (!canRemove) {
       throw new Error("Cannot restore because node_modules exists and is not managed by NodeValt");
     }
-    await fs16.remove(nodeModulesPath);
+    await fs17.remove(nodeModulesPath);
   }
-  await fs16.move(backupPath, nodeModulesPath, {
+  await fs17.move(backupPath, nodeModulesPath, {
     overwrite: false
   });
   updateProjectStatus(options.db, {
@@ -1555,11 +1513,11 @@ async function restoreProjectNodeModules(options) {
   };
 }
 async function findLatestBackup(projectPath) {
-  const entries = await fs16.readdir(projectPath, { withFileTypes: true });
+  const entries = await fs17.readdir(projectPath, { withFileTypes: true });
   const backups = await Promise.all(
     entries.filter((entry) => entry.isDirectory()).filter((entry) => entry.name.startsWith("node_modules.nodevalt-backup-")).map(async (entry) => {
-      const backupPath = path17.join(projectPath, entry.name);
-      const stat = await fs16.stat(backupPath);
+      const backupPath = path18.join(projectPath, entry.name);
+      const stat = await fs17.stat(backupPath);
       return {
         path: backupPath,
         mtimeMs: stat.mtimeMs
@@ -1570,12 +1528,12 @@ async function findLatestBackup(projectPath) {
 }
 
 // packages/scanner/src/scan.ts
-import path19 from "path";
-import fs18 from "fs-extra";
+import path20 from "path";
+import fs19 from "fs-extra";
 
 // packages/scanner/src/package-manager.ts
-import path18 from "path";
-import fs17 from "fs-extra";
+import path19 from "path";
+import fs18 from "fs-extra";
 var LOCKFILES2 = [
   { file: "package-lock.json", manager: "npm" },
   { file: "yarn.lock", manager: "yarn" },
@@ -1597,11 +1555,11 @@ async function detectPackageManager(projectPath, packageManagerField) {
   const warnings = [];
   const presentLockfiles = (await Promise.all(
     LOCKFILES2.map(async (candidate) => {
-      const lockfilePath = path18.join(projectPath, candidate.file);
-      if (!await fs17.pathExists(lockfilePath)) {
+      const lockfilePath = path19.join(projectPath, candidate.file);
+      if (!await fs18.pathExists(lockfilePath)) {
         return null;
       }
-      const stat = await fs17.stat(lockfilePath);
+      const stat = await fs18.stat(lockfilePath);
       return {
         ...candidate,
         path: lockfilePath,
@@ -1653,7 +1611,7 @@ async function scanProjects(rootPathInput, options) {
 async function walk(currentPath, ignoredDirs, projects) {
   let entries;
   try {
-    entries = await fs18.readdir(currentPath, { withFileTypes: true });
+    entries = await fs19.readdir(currentPath, { withFileTypes: true });
   } catch {
     return;
   }
@@ -1665,23 +1623,23 @@ async function walk(currentPath, ignoredDirs, projects) {
     }
   }
   await Promise.all(
-    entries.filter((entry) => entry.isDirectory()).filter((entry) => !isIgnoredDirectory(entry.name, ignoredDirs)).map((entry) => walk(path19.join(currentPath, entry.name), ignoredDirs, projects))
+    entries.filter((entry) => entry.isDirectory()).filter((entry) => !isIgnoredDirectory(entry.name, ignoredDirs)).map((entry) => walk(path20.join(currentPath, entry.name), ignoredDirs, projects))
   );
 }
 function isIgnoredDirectory(name, ignoredDirs) {
   return ignoredDirs.has(name) || name.startsWith("node_modules.nodevalt-backup-");
 }
 async function readProject(projectPath) {
-  const packageJsonPath = path19.join(projectPath, "package.json");
+  const packageJsonPath = path20.join(projectPath, "package.json");
   let packageJson;
   try {
-    packageJson = await fs18.readJson(packageJsonPath);
+    packageJson = await fs19.readJson(packageJsonPath);
   } catch {
     return null;
   }
   const detection = await detectPackageManager(projectPath, packageJson.packageManager);
   const lockfileHash = detection.lockfilePath ? await hashFile(detection.lockfilePath) : null;
-  const nodeModulesPath = path19.join(projectPath, "node_modules");
+  const nodeModulesPath = path20.join(projectPath, "node_modules");
   const hasNodeModules = await hasRootNodeModules(nodeModulesPath);
   const nodeModulesSizeBytes = await getDirectorySizeBytes(nodeModulesPath);
   return {
@@ -1699,7 +1657,7 @@ async function readProject(projectPath) {
 }
 async function hasRootNodeModules(nodeModulesPath) {
   try {
-    const stat = await fs18.lstat(nodeModulesPath);
+    const stat = await fs19.lstat(nodeModulesPath);
     return stat.isDirectory() || stat.isSymbolicLink();
   } catch {
     return false;
@@ -1719,10 +1677,10 @@ function getStatus(packageManager, lockfilePath, hasNodeModules) {
 }
 
 // packages/store/src/populate-store.ts
-import path20 from "path";
+import path21 from "path";
 async function populateStoreFromNpmProject(options) {
   const projectPath = resolveUserPath(options.projectPath);
-  const lockfilePath = path20.join(projectPath, "package-lock.json");
+  const lockfilePath = path21.join(projectPath, "package-lock.json");
   const lockfile = await parseNpmPackageLockFile(lockfilePath);
   const seen = /* @__PURE__ */ new Set();
   const result = {
@@ -2035,8 +1993,8 @@ async function ensureDaemonWatchPath(config, watchPathInput) {
   await addWatchPath(config, await getDefaultDaemonWatchPath());
 }
 async function getDefaultDaemonWatchPath() {
-  const projectsPath = path21.join(os2.homedir(), "projetos");
-  if (await fs19.pathExists(projectsPath)) {
+  const projectsPath = path22.join(os2.homedir(), "projetos");
+  if (await fs20.pathExists(projectsPath)) {
     return projectsPath;
   }
   return process.cwd();
@@ -2113,17 +2071,17 @@ async function materializePendingProjects(db, storePath, shouldStop) {
   return materialized;
 }
 function isDaemonOwnProject(project) {
-  return project.name === "nodevalt" && path21.resolve(project.path) === process.cwd();
+  return project.name === "nodevalt" && path22.resolve(project.path) === process.cwd();
 }
 async function installDaemonLaunchAgent(config, options) {
   await ensureDaemonWatchPath(config, options.path);
-  const cliEntryPoint = path21.join(process.cwd(), "dist", "cli", "index.js");
-  if (!await fs19.pathExists(cliEntryPoint)) {
-    throw new Error("Build the CLI before installing the daemon: npm run build");
+  const cliEntryPoint = fileURLToPath(import.meta.url);
+  if (!await fs20.pathExists(cliEntryPoint)) {
+    throw new Error("Cannot resolve NodeValt CLI entry point");
   }
   const storePaths = getStorePaths(config.storePath);
-  await fs19.ensureDir(storePaths.logs);
-  await fs19.ensureDir(path21.dirname(getLaunchAgentPath()));
+  await fs20.ensureDir(storePaths.logs);
+  await fs20.ensureDir(path22.dirname(getLaunchAgentPath()));
   const programArguments = [
     process.execPath,
     cliEntryPoint,
@@ -2138,11 +2096,11 @@ async function installDaemonLaunchAgent(config, options) {
   const plist = createLaunchAgentPlist({
     programArguments,
     workingDirectory: process.cwd(),
-    stdoutPath: path21.join(storePaths.logs, "daemon.out.log"),
-    stderrPath: path21.join(storePaths.logs, "daemon.err.log")
+    stdoutPath: path22.join(storePaths.logs, "daemon.out.log"),
+    stderrPath: path22.join(storePaths.logs, "daemon.err.log")
   });
   const plistPath = getLaunchAgentPath();
-  await fs19.writeFile(plistPath, plist);
+  await fs20.writeFile(plistPath, plist);
   await launchctl(["bootout", getLaunchAgentDomain(), plistPath], true);
   await launchctl(["bootstrap", getLaunchAgentDomain(), plistPath]);
   await launchctl(["kickstart", "-k", `${getLaunchAgentDomain()}/${LAUNCH_AGENT_LABEL}`]);
@@ -2154,7 +2112,7 @@ async function installDaemonLaunchAgent(config, options) {
 async function uninstallDaemonLaunchAgent() {
   const plistPath = getLaunchAgentPath();
   await launchctl(["bootout", getLaunchAgentDomain(), plistPath], true);
-  await fs19.remove(plistPath);
+  await fs20.remove(plistPath);
   console.log("NodeValt daemon uninstalled");
 }
 async function showDaemonLaunchAgentStatus() {
@@ -2196,7 +2154,7 @@ ${args}
 `;
 }
 function getLaunchAgentPath() {
-  return path21.join(os2.homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
+  return path22.join(os2.homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
 }
 function getLaunchAgentDomain() {
   const uid = process.getuid?.();

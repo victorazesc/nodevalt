@@ -1,7 +1,7 @@
 import path from "node:path";
 import { promises as nodeFs } from "node:fs";
 import fs from "fs-extra";
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "../../database/src/db";
 import type { ParsedNpmPackage } from "../../lockfile-parser/src/types";
 import { upsertPackage } from "../../database/src/packages";
 import { fetchPackageToStore } from "./package-fetcher";
@@ -19,7 +19,7 @@ export interface EnsurePackageResult {
 }
 
 export async function ensureNpmPackageInStore(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   storePath: string;
   pkg: ParsedNpmPackage;
 }): Promise<EnsurePackageResult> {

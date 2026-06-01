@@ -1,5 +1,5 @@
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "../../database/src/db";
 import { parseNpmPackageLockFile } from "../../lockfile-parser/src/npm-parser";
 import { resolveUserPath } from "../../core/src/paths";
 import { ensureNpmPackageInStore } from "./global-store";
@@ -12,7 +12,7 @@ export interface PopulateStoreResult {
 }
 
 export async function populateStoreFromNpmProject(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   storePath: string;
   projectPath: string;
 }): Promise<PopulateStoreResult> {

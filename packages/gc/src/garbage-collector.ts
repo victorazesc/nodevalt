@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "fs-extra";
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "../../database/src/db";
 import { getStorePaths } from "../../core/src/paths";
 import { deletePackage, listPackages } from "../../database/src/packages";
 import { readNodeValtLinksManifest } from "../../materializer/src/nodevalt-manifest";
@@ -12,7 +12,7 @@ export interface GarbageCollectResult {
 }
 
 export async function collectGarbage(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   storePath: string;
 }): Promise<GarbageCollectResult> {
   const referencedStorePaths = await collectReferencedStorePaths(options.storePath);

@@ -1,7 +1,7 @@
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import fs from "fs-extra";
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "../../database/src/db";
 import type { NodeValtConfig } from "../../core/src/config";
 import { hashString } from "../../core/src/paths";
 import { insertEvent } from "../../database/src/events";
@@ -24,7 +24,7 @@ export interface DaemonWatcher {
 
 export async function startDaemonWatcher(options: {
   config: NodeValtConfig;
-  db: Database.Database;
+  db: NodeValtDatabase;
   onDirty?: (projectPath: string) => void;
   onError?: (error: Error) => void;
 }): Promise<DaemonWatcher> {

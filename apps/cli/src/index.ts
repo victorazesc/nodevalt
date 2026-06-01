@@ -2,13 +2,13 @@
 import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
 import { cac } from "cac";
 import fs from "fs-extra";
 import { addWatchPath, initStore, loadOrCreateConfig, type NodeValtConfig } from "../../../packages/core/src/config";
 import { formatBytes, getStorePaths, toDisplayPath } from "../../../packages/core/src/paths";
-import { openNodeValtDatabase } from "../../../packages/database/src/db";
+import { openNodeValtDatabase, type NodeValtDatabase } from "../../../packages/database/src/db";
 import { getPackageCount } from "../../../packages/database/src/packages";
 import { getProjectStats, listProjects, type ProjectRow, upsertProject } from "../../../packages/database/src/projects";
 import { getDaemonWatchFiles, startDaemonWatcher, type DaemonWatcher } from "../../../packages/daemon/src/watcher";
@@ -401,7 +401,7 @@ function parseScanIntervalMs(value?: string): number {
 
 async function runDaemonCycle(options: {
   config: NodeValtConfig;
-  db: Database.Database;
+  db: NodeValtDatabase;
   daemon: DaemonWatcher | null;
   reason: string;
   autoMaterialize: boolean;
@@ -422,7 +422,7 @@ async function runDaemonCycle(options: {
   }
 }
 
-async function scanConfiguredWatchPaths(config: NodeValtConfig, db: Database.Database): Promise<ScannedProject[]> {
+async function scanConfiguredWatchPaths(config: NodeValtConfig, db: NodeValtDatabase): Promise<ScannedProject[]> {
   const existingProjects = new Map(listProjects(db).map((project) => [project.path, project]));
   const scannedProjects = new Map<string, ScannedProject>();
 
@@ -458,7 +458,7 @@ function getNextProjectStatus(project: ScannedProject, existingProject?: Project
 }
 
 async function materializePendingProjects(
-  db: Database.Database,
+  db: NodeValtDatabase,
   storePath: string,
   shouldStop: () => boolean,
 ): Promise<number> {
@@ -511,9 +511,9 @@ async function installDaemonLaunchAgent(
 ): Promise<void> {
   await ensureDaemonWatchPath(config, options.path);
 
-  const cliEntryPoint = path.join(process.cwd(), "dist", "cli", "index.js");
+  const cliEntryPoint = fileURLToPath(import.meta.url);
   if (!(await fs.pathExists(cliEntryPoint))) {
-    throw new Error("Build the CLI before installing the daemon: npm run build");
+    throw new Error("Cannot resolve NodeValt CLI entry point");
   }
 
   const storePaths = getStorePaths(config.storePath);

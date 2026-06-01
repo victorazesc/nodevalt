@@ -1,5 +1,5 @@
 import path from "node:path";
-import type Database from "better-sqlite3";
+import type { NodeValtDatabase } from "../../database/src/db";
 import fs from "fs-extra";
 import { getStorePaths, resolveUserPath } from "../../core/src/paths";
 import { updateProjectMaterialization } from "../../database/src/projects";
@@ -30,7 +30,7 @@ interface InstalledPackage {
 }
 
 export async function materializeInstalledNodeModules(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   storePath: string;
   projectPath: string;
 }): Promise<InstalledNodeModulesMaterializeResult> {
@@ -187,7 +187,7 @@ async function readInstalledPackage(
 }
 
 async function ensureInstalledPackageInStore(options: {
-  db: Database.Database;
+  db: NodeValtDatabase;
   storePath: string;
   sourceNodeModulesPath: string;
   pkg: InstalledPackage;

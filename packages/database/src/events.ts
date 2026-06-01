@@ -1,5 +1,5 @@
-import type Database from "better-sqlite3";
 import { hashString } from "../../core/src/paths";
+import type { NodeValtDatabase } from "./db";
 
 export interface EventInput {
   projectId: string | null;
@@ -8,37 +8,20 @@ export interface EventInput {
   status: string;
 }
 
-export function insertEvent(db: Database.Database, input: EventInput): string {
+export function insertEvent(db: NodeValtDatabase, input: EventInput): string {
   const now = new Date().toISOString();
   const id = hashString(`${input.type}\0${JSON.stringify(input.payload)}\0${now}`);
 
-  db.prepare(`
-    INSERT INTO events (
-      id,
-      project_id,
-      type,
-      payload,
-      status,
-      created_at,
-      processed_at
-    )
-    VALUES (
-      @id,
-      @projectId,
-      @type,
-      @payload,
-      @status,
-      @now,
-      NULL
-    )
-  `).run({
+  db.data.events.push({
     id,
-    projectId: input.projectId,
+    project_id: input.projectId,
     type: input.type,
     payload: JSON.stringify(input.payload),
     status: input.status,
-    now,
+    created_at: now,
+    processed_at: null,
   });
+  db.save();
 
   return id;
 }
