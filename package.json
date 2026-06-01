@@ -29,8 +29,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup apps/cli/src/index.ts --format esm --sourcemap --clean --out-dir dist/cli",
+    "build": "npx --yes tsup@8.5.1 apps/cli/src/index.ts --format esm --sourcemap --clean --out-dir dist/cli",
     "dev": "tsx apps/cli/src/index.ts",
+    "prepare": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
