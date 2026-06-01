@@ -1,5 +1,9 @@
 node_modules/
-dist/
+dist/*
+!dist/cli/
+dist/cli/*
+!dist/cli/index.js
+!dist/cli/index.js.map
 coverage/
 .cache/
 .turbo/
