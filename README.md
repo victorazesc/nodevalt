@@ -4,6 +4,11 @@ Daemon/CLI local para reduzir duplicacao de `node_modules` entre projetos Node.j
 
 Site: https://victorazesc.github.io/nodevalt/
 
+Suporte atual:
+
+- macOS: suportado.
+- Linux e Windows: ainda nao suportados oficialmente.
+
 MVP atual:
 
 - `nodevalt init`
@@ -26,7 +31,7 @@ npm run dev -- gc
 npm run dev -- daemon start
 ```
 
-Instalacao global via GitHub:
+Instalacao global via GitHub no macOS:
 
 ```bash
 npm install -g https://github.com/victorazesc/nodevalt/archive/refs/heads/main.tar.gz
