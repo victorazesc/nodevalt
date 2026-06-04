@@ -1892,7 +1892,7 @@ cli.command("gc", "Remove unreferenced packages from the global store").action(
     }
   })
 );
-cli.command("daemon <action>", "Manage NodeValt daemon").option("--path <path>", "Path to scan/watch").option("--scan-interval <seconds>", "Periodic scan interval in seconds", { default: "60" }).option("--no-auto-materialize", "Scan/watch without replacing node_modules").action(
+cli.command("daemon <action>", "Manage NodeValt daemon").option("--path <path>", "Path to scan/watch").option("--scan-interval <seconds>", "Periodic scan interval in seconds", { default: "60" }).option("--auto-materialize", "Replace node_modules automatically after scan/watch").option("--no-auto-materialize", "Scan/watch without replacing node_modules").action(
   (action, options) => run(async () => {
     const config = await loadOrCreateConfig();
     if (action === "install") {
@@ -1924,7 +1924,7 @@ cli.command("daemon <action>", "Manage NodeValt daemon").option("--path <path>",
       resolveStop();
     };
     const scanIntervalMs = parseScanIntervalMs(options.scanInterval);
-    const autoMaterialize = options.autoMaterialize !== false;
+    const autoMaterialize = isAutoMaterializeEnabled();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     const runCycle = (reason) => {
@@ -2090,8 +2090,8 @@ async function installDaemonLaunchAgent(config, options) {
     "--scan-interval",
     String(Math.round(parseScanIntervalMs(options.scanInterval) / 1e3))
   ];
-  if (options.autoMaterialize === false) {
-    programArguments.push("--no-auto-materialize");
+  if (isAutoMaterializeEnabled()) {
+    programArguments.push("--auto-materialize");
   }
   const plist = createLaunchAgentPlist({
     programArguments,
@@ -2162,6 +2162,9 @@ function getLaunchAgentDomain() {
     throw new Error("LaunchAgent is only supported on Unix-like systems");
   }
   return `gui/${uid}`;
+}
+function isAutoMaterializeEnabled() {
+  return process.argv.includes("--auto-materialize");
 }
 async function launchctl(args, ignoreFailure = false) {
   try {

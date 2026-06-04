@@ -46,13 +46,13 @@ Daemon automatico:
 npm run dev -- daemon start
 ```
 
-Ao iniciar, ele escaneia os paths configurados, materializa projetos npm/yarn que ja possuem `node_modules` na raiz, troca o `node_modules` real por uma arvore local gerenciada com hardlinks/copia e backup, observa mudancas em `package.json`/lockfile e repete o scan a cada 60s.
+Ao iniciar, ele escaneia os paths configurados, observa mudancas em `package.json`/lockfile e repete o scan a cada 60s. A materializacao automatica e opt-in para nao trocar `node_modules` enquanto servidores de dev estao rodando.
 
 Opcoes:
 
 ```bash
 npm run dev -- daemon start --path ~/projetos --scan-interval 30
-npm run dev -- daemon start --no-auto-materialize
+npm run dev -- daemon start --auto-materialize
 ```
 
 Rodando como observer do macOS:

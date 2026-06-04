@@ -252,6 +252,7 @@ cli
   .command("daemon <action>", "Manage NodeValt daemon")
   .option("--path <path>", "Path to scan/watch")
   .option("--scan-interval <seconds>", "Periodic scan interval in seconds", { default: "60" })
+  .option("--auto-materialize", "Replace node_modules automatically after scan/watch")
   .option("--no-auto-materialize", "Scan/watch without replacing node_modules")
   .action(
     (
@@ -298,7 +299,7 @@ cli
           resolveStop();
         };
         const scanIntervalMs = parseScanIntervalMs(options.scanInterval);
-        const autoMaterialize = options.autoMaterialize !== false;
+        const autoMaterialize = isAutoMaterializeEnabled();
 
         process.once("SIGINT", stop);
         process.once("SIGTERM", stop);
@@ -528,8 +529,8 @@ async function installDaemonLaunchAgent(
     "--scan-interval",
     String(Math.round(parseScanIntervalMs(options.scanInterval) / 1000)),
   ];
-  if (options.autoMaterialize === false) {
-    programArguments.push("--no-auto-materialize");
+  if (isAutoMaterializeEnabled()) {
+    programArguments.push("--auto-materialize");
   }
 
   const plist = createLaunchAgentPlist({
@@ -618,6 +619,10 @@ function getLaunchAgentDomain(): string {
   }
 
   return `gui/${uid}`;
+}
+
+function isAutoMaterializeEnabled(): boolean {
+  return process.argv.includes("--auto-materialize");
 }
 
 async function launchctl(args: string[], ignoreFailure = false): Promise<{ stdout: string; stderr: string }> {

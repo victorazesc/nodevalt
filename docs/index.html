@@ -39,7 +39,7 @@
           <h1 id="hero-title">NodeValt</h1>
           <p class="hero-copy">
             Reduza a repeticao de <code>node_modules</code> entre projetos com store global,
-            materializacao segura, backups e um observer discreto no macOS.
+            materializacao sob demanda, backups e um observer discreto no macOS.
           </p>
           <div class="hero-actions" aria-label="Acoes principais">
             <a class="button primary" href="#instalar">Instalar agora</a>
@@ -92,7 +92,7 @@
             <article class="feature-card">
               <span class="step">04</span>
               <h3>Observa</h3>
-              <p>O daemon acompanha mudancas relevantes e repete o scan em intervalos configuraveis.</p>
+              <p>O daemon acompanha mudancas relevantes e repete o scan sem trocar <code>node_modules</code> por padrao.</p>
             </article>
           </div>
         </div>
@@ -135,6 +135,7 @@ nodevalt daemon status</code></pre>
             <div><code>nodevalt scan ~/projetos</code><span>descobre projetos candidatos</span></div>
             <div><code>nodevalt store populate ./app</code><span>preenche o store global</span></div>
             <div><code>nodevalt materialize ./app</code><span>ativa a arvore gerenciada</span></div>
+            <div><code>nodevalt daemon start --auto-materialize</code><span>ativa materializacao automatica opcional</span></div>
             <div><code>nodevalt restore ./app</code><span>volta para o backup local</span></div>
             <div><code>nodevalt doctor ./app</code><span>valida links, store e estado</span></div>
             <div><code>nodevalt gc</code><span>remove pacotes nao usados</span></div>
